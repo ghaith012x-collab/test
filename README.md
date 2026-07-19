@@ -1,4 +1,30 @@
-import cv2
+Tor Browser Integration:
+Replace standard Chromium with Tor Browser for each test instance to eliminate IP fingerprinting and geolocation leaks:
+ • Launch Tor Browser via Playwright using firefox.launch() with custom executable path pointing to Tor Browser's Firefox binary
+ • Configure Tor SOCKS5 proxy (127.0.0.1:9050 or random control port per instance) for circuit isolation per account
+ • Use Tor's ControlPort to request NEWNYM (new identity/circuit) between each signup attempt, ensuring no IP reuse across tests
+ • Leverage Tor's built-in anti-fingerprinting: randomized canvas, WebGL disabled or spoofed, consistent timezone spoofing, and built-in letterboxing to standard screen sizes
+ • Each test instance spawns its own Tor process with isolated DataDirectory so circuits don't overlap between parallel workers
+Live Cam — 2 Second Refresh:
+Override the existing screenshot system to capture every 2 seconds regardless of workflow state:
+￼
+ • The live cam runs on a dedicated thread with a thread-safe queue, avoiding Playwright's "cannot switch to a different thread" greenlet errors
+ • Dashboard fetches from screenshots[username] with a ?t=timestamp cache-buster for real-time feed
+ • Add a "recording" mode that saves every 10th frame to disk as MP4 via imageio for post-mortem analysis of failed runs
+Tor-Specific Anti-Detection Tweaks:
+ • Tor Browser's default user agent is already hardened, but randomize the Firefox ESR version string slightly across instances
+ • Disable WebRTC entirely (media.peerconnection.enabled=false) to prevent IP leaks through STUN
+ • Force privacy.resistFingerprinting=true for maximum entropy reduction
+ • Use Tor's built-in NoScript handling with per-site JavaScript whitelisting for TikTok domains only
+Dashboard Live Feed Endpoint:
+￼
+Parallel Instance Management:
+ • Each Tor + Playwright instance runs in its own Docker container with isolated network namespace
+ • Orchestrate via docker-compose with 10-50 parallel workers, each with dedicated Tor circuit
+ • Central Redis queue for distributing test jobs, SQLite for results aggregation
+ • Auto-restart failed containers and rotate to fresh Tor exit nodes on detection
+
+Extra: Use test email zeroghaith2012@gmail.com make sure nothing is manual, everything is automation, make a site with a 6 digit code field and a live cam, and also a start button, for starting gen, it auto uses the email, fills the username, email, date, and also click the submit/next button and when it asks for digit code i put it in and send itc then bot writes it in, make sure no mistakes, no errors, everything done correctly, make sure to create a insane captcha finder detector, and use a puzzle slide solver like import cv2
 import numpy as np
 from PIL import Image
 import io
