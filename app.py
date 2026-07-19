@@ -2,7 +2,8 @@ import os, sys, json, threading, time
 from flask import Flask, render_template, jsonify, request, Response
 from bot import (
     start_worker, stop_worker, get_screenshot, get_worker_status,
-    workers, screenshots, last_frame_ts, browser_sessions, create_placeholder
+    workers, screenshots, last_frame_ts, browser_sessions, create_placeholder,
+    generate_password, generate_dob,
 )
 
 app = Flask(__name__)
@@ -16,17 +17,31 @@ def index():
 @app.route("/api/start", methods=["POST"])
 def api_start():
     data = request.get_json() or {}
-    username = data.get("username", "test_user")
-    email = data.get("email", "zeroghaith2012@gmail.com")
-    password = data.get("password", "")
-    dob = data.get("dob", "1995-01-01")
-    tor_offset = data.get("tor_offset", 0)
-    
-    if not password:
+    username = data.get("username", "test_user").strip() or "test_user"
+    email = data.get("email", "zeroghaith2012@gmail.com").strip()
+    auto_password = bool(data.get("auto_password", True))
+    auto_dob = bool(data.get("auto_dob", True))
+    password = data.get("password", "") if not auto_password else ""
+    dob = data.get("dob", "") if not auto_dob else ""
+
+    if not email:
+        return jsonify({"error": "Email required"}), 400
+    if not auto_password and not password:
         return jsonify({"error": "Password required"}), 400
-    
-    success = start_worker(username, email, password, dob, tor_offset)
-    return jsonify({"started": success, "username": username})
+
+    # Pre-generate for display so the user can save the account.
+    gen_password = generate_password() if (auto_password or not password) else password
+    gen_dob = generate_dob() if (auto_dob or not dob) else dob
+
+    success = start_worker(
+        username, email, gen_password, gen_dob,
+        data.get("tor_offset", 0), auto_password, auto_dob
+    )
+    return jsonify({
+        "started": success,
+        "username": username,
+        "generated": {"password": gen_password, "dob": gen_dob} if (auto_password or auto_dob) else None
+    })
 
 @app.route("/api/stop", methods=["POST"])
 def api_stop():
@@ -40,11 +55,18 @@ def api_status(username):
     status = get_worker_status(username)
     ss = screenshots.get(username)
     last = last_frame_ts.get(username, 0)
+    log_text = ""
+    try:
+        from database import get_log
+        log_text = get_log(username)
+    except Exception:
+        pass
     return jsonify({
         "status": status,
         "has_screenshot": ss is not None,
         "last_frame_age": round(time.time() - last, 1),
-        "browser_alive": username in browser_sessions
+        "browser_alive": username in browser_sessions,
+        "log": log_text
     })
 
 @app.route("/live/<username>")
@@ -53,14 +75,12 @@ def live_feed(username):
     img = screenshots.get(username)
     if not img or time.time() - last_frame_ts.get(username, 0) > 10:
         img = create_placeholder(username, "Waiting for signal...")
-    
-    buf = getattr(img, "_buf", None)
-    if buf is None:
-        import io
-        buf = io.BytesIO()
-        img.save(buf, format="PNG")
-        buf.seek(0)
-    
+
+    import io
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    buf.seek(0)
+
     return Response(buf.getvalue(), mimetype="image/png", headers={
         "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
         "Pragma": "no-cache",

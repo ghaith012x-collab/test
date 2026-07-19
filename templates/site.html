@@ -1,0 +1,372 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>TOR Bot — TikTok Signup Dashboard</title>
+<style>
+  :root {
+    --bg: #0a0a0f;
+    --panel: #14141c;
+    --panel-2: #1c1c28;
+    --accent: #ff0050;
+    --accent-2: #25f4ee;
+    --text: #e8e8ef;
+    --muted: #8a8a9a;
+    --ok: #2ecc71;
+    --warn: #f1c40f;
+    --err: #e74c3c;
+    --radius: 14px;
+    --shadow: 0 8px 30px rgba(0,0,0,0.45);
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: "Segoe UI", system-ui, -apple-system, Roboto, sans-serif;
+    background: radial-gradient(1200px 700px at 80% -10%, #1a0a16 0%, var(--bg) 55%);
+    color: var(--text);
+    min-height: 100vh;
+  }
+  header {
+    display: flex; align-items: center; gap: 14px;
+    padding: 18px 26px;
+    border-bottom: 1px solid #23232f;
+    background: linear-gradient(90deg, rgba(255,0,80,0.08), rgba(37,244,238,0.06));
+    position: sticky; top: 0; z-index: 10; backdrop-filter: blur(8px);
+  }
+  header .logo {
+    width: 34px; height: 34px; border-radius: 9px;
+    background: linear-gradient(135deg, var(--accent), var(--accent-2));
+    box-shadow: 0 0 18px rgba(255,0,80,0.5);
+  }
+  header h1 { font-size: 18px; margin: 0; letter-spacing: 0.5px; }
+  header .sub { color: var(--muted); font-size: 12px; margin-top: 2px; }
+  header .status-pill {
+    margin-left: auto; display: flex; align-items: center; gap: 8px;
+    background: var(--panel); border: 1px solid #2a2a38; padding: 8px 14px;
+    border-radius: 999px; font-size: 13px;
+  }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--muted); }
+  .dot.live { background: var(--ok); box-shadow: 0 0 10px var(--ok); animation: pulse 1.4s infinite; }
+  .dot.busy { background: var(--warn); box-shadow: 0 0 10px var(--warn); }
+  .dot.dead { background: var(--err); }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.35} }
+
+  .grid {
+    display: grid;
+    grid-template-columns: 1.6fr 1fr;
+    gap: 18px;
+    padding: 22px 26px;
+    max-width: 1500px; margin: 0 auto;
+  }
+  @media (max-width: 980px) { .grid { grid-template-columns: 1fr; } }
+
+  .card {
+    background: var(--panel);
+    border: 1px solid #23232f;
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    overflow: hidden;
+  }
+  .card h2 {
+    font-size: 13px; text-transform: uppercase; letter-spacing: 1px;
+    color: var(--muted); margin: 0; padding: 14px 18px;
+    border-bottom: 1px solid #23232f;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .card .body { padding: 18px; }
+
+  .live-wrap {
+    background: #000; border-radius: 10px; overflow: hidden; position: relative;
+    aspect-ratio: 16/9; display: flex; align-items: center; justify-content: center;
+  }
+  .live-wrap img { width: 100%; height: 100%; object-fit: contain; }
+  .live-tag {
+    position: absolute; top: 10px; left: 10px; background: rgba(0,0,0,0.6);
+    color: #fff; font-size: 11px; padding: 4px 10px; border-radius: 6px;
+    border: 1px solid rgba(255,255,255,0.15);
+  }
+  .live-tag .dot { display: inline-block; vertical-align: middle; margin-right: 6px; }
+
+  form { display: grid; gap: 13px; }
+  .field { display: grid; gap: 6px; }
+  label { font-size: 12px; color: var(--muted); }
+  input[type="text"], input[type="email"], input[type="password"], input[type="date"], select {
+    width: 100%; padding: 11px 12px; border-radius: 10px;
+    background: var(--panel-2); border: 1px solid #2a2a38; color: var(--text);
+    font-size: 14px; outline: none; transition: border .2s, box-shadow .2s;
+  }
+  input:focus, select:focus { border-color: var(--accent-2); box-shadow: 0 0 0 3px rgba(37,244,238,0.12); }
+  .row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .auto-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .switch { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text); cursor: pointer; }
+  .switch input { width: 18px; height: 18px; accent-color: var(--accent); }
+
+  .btn {
+    border: none; cursor: pointer; border-radius: 10px; padding: 12px 16px;
+    font-size: 14px; font-weight: 600; letter-spacing: .3px; transition: transform .12s, filter .2s;
+    display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  }
+  .btn:active { transform: translateY(1px); }
+  .btn.primary { background: linear-gradient(135deg, var(--accent), #ff5277); color: #fff; }
+  .btn.ghost { background: var(--panel-2); color: var(--text); border: 1px solid #2a2a38; }
+  .btn.danger { background: transparent; color: var(--err); border: 1px solid var(--err); }
+  .btn:disabled { opacity: .45; cursor: not-allowed; }
+  .btn-row { display: flex; gap: 10px; }
+
+  .gen-creds {
+    background: var(--panel-2); border: 1px dashed #33334a; border-radius: 10px;
+    padding: 12px; font-size: 12px; color: var(--muted); display: grid; gap: 6px;
+  }
+  .gen-creds b { color: var(--accent-2); }
+
+  #log {
+    height: 320px; overflow-y: auto; background: #0b0b12; border-radius: 10px;
+    padding: 12px; font-family: "SFMono-Regular", Consolas, monospace; font-size: 12.5px;
+    line-height: 1.55; border: 1px solid #23232f;
+  }
+  #log .line { white-space: pre-wrap; word-break: break-word; }
+  #log .t { color: #555; }
+  #log .ok { color: var(--ok); }
+  #log .warn { color: var(--warn); }
+  #log .err { color: var(--err); }
+  #log .info { color: var(--accent-2); }
+
+  .hint { font-size: 11px; color: var(--muted); }
+  .footer { text-align: center; color: #555; font-size: 11px; padding: 12px; }
+</style>
+</head>
+<body>
+<header>
+  <div class="logo"></div>
+  <div>
+    <h1>TOR Bot</h1>
+    <div class="sub">TikTok Signup Automation Dashboard</div>
+  </div>
+  <div class="status-pill">
+    <span class="dot" id="statusDot"></span>
+    <span id="statusText">Idle</span>
+  </div>
+</header>
+
+<div class="grid">
+  <!-- LEFT: Live + controls -->
+  <div style="display:grid; gap:18px;">
+    <div class="card">
+      <h2>Live Browser Feed</h2>
+      <div class="body">
+        <div class="live-wrap">
+          <span class="live-tag"><span class="dot" id="liveDot"></span>LIVE</span>
+          <img id="liveImg" alt="live feed" src="/live/test_user" />
+        </div>
+        <p class="hint" id="feedHint">Start a worker to begin streaming the browser session.</p>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Account Configuration</h2>
+      <div class="body">
+        <form id="startForm">
+          <div class="field">
+            <label for="username">Username / Handle</label>
+            <input type="text" id="username" value="test_user" autocomplete="off" />
+          </div>
+          <div class="field">
+            <label for="email">Email</label>
+            <input type="email" id="email" value="zeroghaith2012@gmail.com" autocomplete="off" />
+          </div>
+
+          <div class="auto-row">
+            <label class="switch"><input type="checkbox" id="autoCreds" checked /> Auto-generate password</label>
+            <label class="switch"><input type="checkbox" id="autoDob" checked /> Auto-select date of birth</label>
+          </div>
+
+          <div class="row">
+            <div class="field">
+              <label for="password">Password</label>
+              <input type="password" id="password" placeholder="auto-generated" autocomplete="off" />
+            </div>
+            <div class="field">
+              <label for="dob">Date of Birth</label>
+              <input type="date" id="dob" value="1995-01-01" />
+            </div>
+          </div>
+
+          <div class="gen-creds" id="genCreds">
+            <span>Auto credentials will be generated server-side when enabled.</span>
+          </div>
+
+          <div class="field">
+            <label for="torOffset">Tor Port Offset</label>
+            <input type="number" id="torOffset" value="0" min="0" max="50" />
+          </div>
+
+          <div class="btn-row">
+            <button class="btn primary" id="startBtn" type="submit">▶ Start Worker</button>
+            <button class="btn danger" id="stopBtn" type="button" disabled>■ Stop</button>
+          </div>
+          <p class="hint" id="formMsg"></p>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- RIGHT: status + log -->
+  <div style="display:grid; gap:18px;">
+    <div class="card">
+      <h2>Worker Status</h2>
+      <div class="body" id="statusBody">
+        <div class="gen-creds">
+          <div>Status: <b id="sStatus">idle</b></div>
+          <div>Browser alive: <b id="sBrowser">no</b></div>
+          <div>Last frame age: <b id="sAge">—</b>s</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Event Log</h2>
+      <div class="body">
+        <div id="log"></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Manual OTP</h2>
+      <div class="body">
+        <form id="otpForm" class="row">
+          <input type="text" id="otp" placeholder="6-digit code" autocomplete="off" />
+          <button class="btn ghost" type="submit">Inject</button>
+        </form>
+        <p class="hint">Use this if auto-fetch from Gmail fails.</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="footer">TOR Bot · built with Flask + Playwright</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+function logLine(msg, cls="info") {
+  const el = $("log");
+  const t = new Date().toLocaleTimeString();
+  const div = document.createElement("div");
+  div.className = "line";
+  div.innerHTML = `<span class="t">[${t}]</span> <span class="${cls}">${msg}</span>`;
+  el.appendChild(div);
+  el.scrollTop = el.scrollHeight;
+}
+
+let currentUser = "test_user";
+let pollTimer = null;
+
+function classify(text) {
+  if (/error|fail|fatal|exception/i.test(text)) return "err";
+  if (/warn|captcha|waiting|manual/i.test(text)) return "warn";
+  if (/success|solved|started|complete|fetched/i.test(text)) return "ok";
+  return "info";
+}
+
+function setStatus(state, text) {
+  const dot = $("statusDot");
+  dot.className = "dot " + (state === "live" ? "live" : state === "busy" ? "busy" : state === "dead" ? "dead" : "");
+  $("statusText").textContent = text;
+}
+
+function updateLive() {
+  const img = $("liveImg");
+  img.src = "/live/" + encodeURIComponent(currentUser) + "?t=" + Date.now();
+}
+
+function pollStatus() {
+  fetch("/api/status/" + encodeURIComponent(currentUser))
+    .then(r => r.json())
+    .then(d => {
+      $("sStatus").textContent = d.status?.running ? "running" : (d.status?.success ? "success" : "idle");
+      $("sBrowser").textContent = d.browser_alive ? "yes" : "no";
+      $("sAge").textContent = d.last_frame_age ?? "—";
+      if (d.status?.success) setStatus("live", "Signup complete");
+      else if (d.browser_alive) setStatus("busy", "Running");
+      else setStatus("idle", "Idle");
+
+      if (typeof d.log === "string" && d.log) {
+        d.log.split("\n").filter(Boolean).forEach(l => logLine(l, classify(l)));
+      }
+    })
+    .catch(() => {});
+  updateLive();
+}
+
+$("startForm").addEventListener("submit", (e) => {
+  e.preventDefault();
+  const autoCreds = $("autoCreds").checked;
+  const autoDob = $("autoDob").checked;
+  const payload = {
+    username: $("username").value.trim() || "test_user",
+    email: $("email").value.trim(),
+    password: autoCreds ? "" : $("password").value,
+    dob: autoDob ? "" : $("dob").value,
+    auto_password: autoCreds,
+    auto_dob: autoDob,
+    tor_offset: parseInt($("torOffset").value, 10) || 0
+  };
+  if (!autoCreds && !payload.password) { $("formMsg").textContent = "Enter a password or enable auto-generate."; return; }
+  currentUser = payload.username;
+  $("startBtn").disabled = true; $("stopBtn").disabled = false;
+  $("feedHint").textContent = "Starting worker for " + currentUser + "...";
+  $("liveImg").src = "/live/" + encodeURIComponent(currentUser) + "?t=" + Date.now();
+  logLine("Requesting start for " + currentUser + " (auto_pw=" + autoCreds + ", auto_dob=" + autoDob + ")", "info");
+  fetch("/api/start", {
+    method: "POST", headers: {"Content-Type": "application/json"},
+    body: JSON.stringify(payload)
+  })
+    .then(r => r.json())
+    .then(d => {
+      if (d.error) { $("formMsg").textContent = d.error; logLine("ERROR: " + d.error, "err"); $("startBtn").disabled = false; return; }
+      $("formMsg").textContent = "Worker started.";
+      logLine("Worker started: " + d.username, "ok");
+      if (d.generated) {
+        $("genCreds").innerHTML = `<div>Generated password: <b>${d.generated.password}</b></div><div>DOB: <b>${d.generated.dob}</b></div>`;
+      }
+      if (pollTimer) clearInterval(pollTimer);
+      pollTimer = setInterval(pollStatus, 2000);
+    })
+    .catch(err => { $("formMsg").textContent = "Request failed."; logLine("FETCH ERROR: " + err, "err"); $("startBtn").disabled = false; });
+});
+
+$("stopBtn").addEventListener("click", () => {
+  fetch("/api/stop", {
+    method: "POST", headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({ username: currentUser })
+  })
+    .then(() => {
+      logLine("Stop requested for " + currentUser, "warn");
+      $("startBtn").disabled = false; $("stopBtn").disabled = true;
+      if (pollTimer) clearInterval(pollTimer);
+    });
+});
+
+$("otpForm").addEventListener("submit", (e) => {
+  e.preventDefault();
+  const otp = $("otp").value.trim();
+  if (!otp) return;
+  fetch("/api/otp", {
+    method: "POST", headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({ username: currentUser, otp })
+  })
+    .then(r => r.json())
+    .then(d => { logLine("OTP injected: " + (d.received ? "ok" : "failed"), d.received ? "ok" : "err"); $("otp").value = ""; });
+});
+
+$("autoCreds").addEventListener("change", () => {
+  $("password").disabled = $("autoCreds").checked;
+  if ($("autoCreds").checked) $("password").placeholder = "auto-generated";
+});
+$("autoDob").addEventListener("change", () => { $("dob").disabled = $("autoDob").checked; });
+
+setStatus("idle", "Idle");
+logLine("Dashboard ready.", "info");
+</script>
+</body>
+</html>

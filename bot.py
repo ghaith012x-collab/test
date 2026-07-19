@@ -584,9 +584,17 @@ def get_gmail_otp(gmail_user="zeroghaith2012@gmail.com", gmail_pass=None, timeou
         return None
 
 # === TIKTOK SIGNUP FLOW ===
-def signup_tiktok(username, email, password, dob, tor_port_offset=0):
+def signup_tiktok(username, email, password, dob, tor_port_offset=0, auto_password=False, auto_dob=False):
     """Full TikTok account creation with Tor, captcha solving, and OTP handling."""
     log(f"[{username}] === STARTING TIKTOK SIGNUP ===")
+
+    # Auto-generate credentials when requested / missing
+    if auto_password or not password:
+        password = generate_password()
+        log(f"[{username}] Auto-generated password: {password}")
+    if auto_dob or not dob:
+        dob = generate_dob()
+        log(f"[{username}] Auto-selected DOB: {dob}")
     
     # Start Tor
     tor_proc, socks_port, control_port = _start_tor_instance(username, tor_port_offset)
@@ -611,8 +619,10 @@ def signup_tiktok(username, email, password, dob, tor_port_offset=0):
         try:
             email_input = page.locator('input[type="email"], input[name="email"], input[placeholder*="email" i]').first
             if email_input.count() > 0:
+                email_input.wait_for(state="visible", timeout=8000)
                 email_input.fill(email)
                 time.sleep(random.uniform(0.5, 1.5))
+                log(f"[{username}] Email filled")
         except Exception as e:
             log(f"[{username}] Email fill error: {e}")
         
@@ -620,17 +630,25 @@ def signup_tiktok(username, email, password, dob, tor_port_offset=0):
         try:
             pass_input = page.locator('input[type="password"], input[name="password"]').first
             if pass_input.count() > 0:
+                pass_input.wait_for(state="visible", timeout=8000)
                 pass_input.fill(password)
                 time.sleep(random.uniform(0.5, 1.5))
+                log(f"[{username}] Password filled")
         except Exception as e:
             log(f"[{username}] Password fill error: {e}")
         
-        # Fill DOB if needed
+        # Fill DOB (dropdowns or native date input)
         if dob:
             try:
-                # TikTok usually has dropdowns or a date picker
-                pass
-            except: pass
+                if not _fill_dob_selectors(page, dob):
+                    # Fallback: native date input
+                    dob_input = page.locator('input[type="date"], input[name*="birth" i], input[placeholder*="date" i]').first
+                    if dob_input.count() > 0:
+                        dob_input.fill(dob)
+                log(f"[{username}] DOB filled: {dob}")
+                time.sleep(random.uniform(0.5, 1.2))
+            except Exception as e:
+                log(f"[{username}] DOB fill error: {e}")
         
         # Click signup/submit
         try:
@@ -728,18 +746,22 @@ def start_live_cam(username):
     return t
 
 # === WORKER CONTROL ===
-def start_worker(username, email, password, dob, tor_offset=0):
+def start_worker(username, email, password, dob, tor_offset=0, auto_password=False, auto_dob=False):
     if username in workers:
         return False
     workers[username] = {"running": True}
-    thread = threading.Thread(target=_worker_thread, args=(username, email, password, dob, tor_offset), daemon=True)
+    thread = threading.Thread(
+        target=_worker_thread,
+        args=(username, email, password, dob, tor_offset, auto_password, auto_dob),
+        daemon=True
+    )
     thread.start()
     return True
 
-def _worker_thread(username, email, password, dob, tor_offset):
+def _worker_thread(username, email, password, dob, tor_offset, auto_password, auto_dob):
     start_live_cam(username)
     try:
-        success = signup_tiktok(username, email, password, dob, tor_offset)
+        success = signup_tiktok(username, email, password, dob, tor_offset, auto_password, auto_dob)
         workers[username]["success"] = success
     except Exception as e:
         log(f"[{username}] Worker error: {e}")
@@ -765,6 +787,103 @@ def stop_worker(username):
             browser_sessions[username]["pw"].stop()
         except: pass
         del browser_sessions[username]
+
+# === CREDENTIAL GENERATION ===
+def generate_password(length=14):
+    """Generate a strong, TikTok-friendly password."""
+    lower = "abcdefghjkmnpqrstuvwxyz"
+    upper = "ABCDEFGHJKLMNPQRSTUVWXYZ"
+    digits = "23456789"
+    all_chars = lower + upper + digits
+    pwd = [
+        random.choice(lower),
+        random.choice(upper),
+        random.choice(digits),
+    ]
+    pwd += [random.choice(all_chars) for _ in range(length - 3)]
+    random.shuffle(pwd)
+    return "".join(pwd)
+
+def generate_dob(min_age=18, max_age=45):
+    """Return a random DOB (ISO date) making the user old enough to register."""
+    today = datetime.now().date()
+    max_birth = today.replace(year=today.year - min_age)
+    min_birth = today.replace(year=today.year - max_age)
+    span_days = (max_birth - min_birth).days
+    birth = min_birth + timedelta(days=random.randint(0, span_days))
+    return birth.isoformat()
+
+def _fill_dob_selectors(page, dob):
+    """Fill the TikTok date-of-birth UI which uses month/day/year dropdowns."""
+    try:
+        dt = datetime.strptime(dob, "%Y-%m-%d")
+    except Exception:
+        return False
+
+    month_names = ["January", "February", "March", "April", "May", "June",
+                   "July", "August", "September", "October", "November", "December"]
+    month_label = month_names[dt.month - 1]
+
+    selectors_by_field = {
+        "month": [
+            'select[name="birthMonth"], select[data-e2e*="month" i], select[aria-label*="month" i]',
+            'div[role="button"]:has-text("Month"), [data-e2e*="month" i]',
+        ],
+        "day": [
+            'select[name="birthDay"], select[data-e2e*="day" i], select[aria-label*="day" i]',
+            'div[role="button"]:has-text("Day"), [data-e2e*="day" i]',
+        ],
+        "year": [
+            'select[name="birthYear"], select[data-e2e*="year" i], select[aria-label*="year" i]',
+            'div[role="button"]:has-text("Year"), [data-e2e*="year" i]',
+        ],
+    }
+    values = {
+        "month": [str(dt.month), month_label, f"{dt.month:02d}"],
+        "day": [str(dt.day), f"{dt.day:02d}"],
+        "year": [str(dt.year)],
+    }
+
+    filled = 0
+    for field, sels in selectors_by_field.items():
+        for sel in sels:
+            try:
+                el = page.locator(sel).first
+                if el.count() == 0 or not el.is_visible():
+                    continue
+                tag = (el.evaluate("e => e.tagName.toLowerCase()") or "")
+                if tag == "select":
+                    for v in values[field]:
+                        try:
+                            el.select_option(label=v, timeout=1500)
+                            filled += 1
+                            break
+                        except Exception:
+                            pass
+                        try:
+                            el.select_option(value=v, timeout=1500)
+                            filled += 1
+                            break
+                        except Exception:
+                            pass
+                else:
+                    el.click(timeout=1500)
+                    time.sleep(0.4)
+                    for v in values[field]:
+                        try:
+                            opt = page.locator(f'div[role="option"]:has-text("{v}"), li:has-text("{v}"), [role="option"]:has-text("{v}")').first
+                            if opt.count() > 0 and opt.is_visible():
+                                opt.click(timeout=1500)
+                                filled += 1
+                                break
+                        except Exception:
+                            pass
+                if filled > 0:
+                    time.sleep(0.4)
+                break
+            except Exception:
+                continue
+    return filled > 0
 
 # === UTILS ===
 def get_screenshot(username):
