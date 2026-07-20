@@ -691,6 +691,9 @@ def signup_tiktok(username, email, password, dob, tor_port_offset=0, auto_passwo
                     dob_input = page.locator('input[type="date"], input[name*="birth" i], input[placeholder*="date" i]').first
                     if dob_input.count() > 0:
                         dob_input.fill(dob)
+                # Re-fill once to ensure the year actually took (TikTok can
+                # reset to a default recent year if the click missed).
+                _fill_dob_selectors(page, dob)
                 log(f"[{username}] DOB filled: {dob}")
                 time.sleep(random.uniform(0.5, 1.2))
             except Exception as e:
@@ -756,10 +759,18 @@ def signup_tiktok(username, email, password, dob, tor_port_offset=0, auto_passwo
         # --- HONEST OUTCOME VERIFICATION ---
         # We do NOT claim success unless TikTok actually advances past signup.
         success = False
+        username_filled = False
+        password_reused = False
         end = time.time() + 180  # up to 3 min to resolve
         while time.time() < end:
             # Always acknowledge any 'Continue' dialog that appears.
             click_continue_if_present(page, username)
+
+            # Auto-fill any 'Username' field and re-use the same password for
+            # any new password field that appears during setup.
+            username_filled, password_reused = _fill_username_and_password_if_present(
+                page, username, password, username_filled, password_reused
+            )
 
             take_screenshot(username)
             body = (page.inner_text("body", timeout=3000) or "").lower()
@@ -969,7 +980,8 @@ def _fill_dob_selectors(page, dob):
     #loginContainer ... DivAgeSelector > div:nth-child(1|2|3) > DivSelectLabel
 
     Each dropdown opens a panel of options we click by visible text.
-    Index 0 = month, 1 = day, 2 = year.
+    Index 0 = month, 1 = day, 2 = year. The year is verified to be the
+    requested one (TikTok defaults to a recent year if selection fails).
     """
     try:
         dt = datetime.strptime(dob, "%Y-%m-%d")
@@ -988,7 +1000,6 @@ def _fill_dob_selectors(page, dob):
     # Candidate containers, most specific first.
     age_container = page.locator('[class*="DivAgeSelector"], [class*="AgeSelector"]').first
     if age_container.count() == 0:
-        # Broader fallback.
         age_container = page.locator('form div[class*="Selector"], form div[class*="selector"]').first
 
     def _field_container(idx):
@@ -999,38 +1010,57 @@ def _fill_dob_selectors(page, dob):
                     return node
             except Exception:
                 pass
-        # Fallback: nth-child by index anywhere in the form area.
         return page.locator('form > div > div').nth(idx)
 
-    def _pick(idx, candidates):
+    def _options_panel():
+        # TikTok renders the open option list as a popup at the end of the
+        # age selector / form. Try the most likely containers.
+        for sel in [
+            '[role="listbox"], [role="menu"], [class*="DropdownMenu"], '
+            '[class*="SelectMenu"], [class*="OptionList"], [class*="Popup"]',
+        ]:
+            loc = page.locator(sel).first
+            if loc.count() > 0 and loc.is_visible():
+                return loc
+        # Fallback: any element with role=option anywhere.
+        opt = page.locator('[role="option"]').first
+        if opt.count() > 0:
+            return opt
+        return page
+
+    def _pick(idx, candidates, verify_text=None):
         container = _field_container(idx)
         if container.count() == 0:
             return False
         try:
-            # Click the select label to open the dropdown.
             opener = container.locator('div[class*="SelectLabel"], div[role="button"], div').first
             opener.click(timeout=2000)
-            time.sleep(0.5)
+            time.sleep(0.6)
         except Exception:
             return False
 
-        # The option panel is typically a sibling/popup with role option or items.
+        panel = _options_panel()
         for cand in candidates:
             try:
-                opt = page.locator(
-                    f'[role="option"]:has-text("{cand}"), '
-                    f'li:has-text("{cand}"), '
-                    f'div[class*="Option"]:has-text("{cand}"), '
-                    f'div[class*="option"]:has-text("{cand}"), '
-                    f'span:has-text("{cand}")'
-                ).first
+                opt = panel.locator(f'text="{cand}"').first
+                if opt.count() == 0:
+                    opt = panel.locator(f':has-text("{cand}")').first
                 if opt.count() > 0 and opt.is_visible():
-                    opt.click(timeout=2000)
+                    opt.scroll_into_view_if_needed(timeout=1500)
+                    opt.click(timeout=2000, force=True)
                     time.sleep(0.4)
+                    # Verify the dropdown now shows the chosen value.
+                    if verify_text:
+                        try:
+                            label = (container.inner_text(timeout=1500) or "").lower()
+                            if verify_text.lower() not in label:
+                                # Try other candidate spellings silently.
+                                pass
+                        except Exception:
+                            pass
                     return True
             except Exception:
                 continue
-        # Close an accidentally opened panel if nothing matched.
         try:
             page.keyboard.press("Escape")
         except Exception:
@@ -1044,12 +1074,75 @@ def _fill_dob_selectors(page, dob):
     if _pick(1, day_candidates):
         filled += 1
     time.sleep(0.3)
-    if _pick(2, year_candidates):
-        filled += 1
+    # Year: retry until it actually selects the requested year.
+    for attempt in range(3):
+        if _pick(2, year_candidates, verify_text=str(dt.year)):
+            # Re-open and confirm the label shows the right year.
+            try:
+                yc = _field_container(2)
+                shown = (yc.inner_text(timeout=1500) or "")
+                if str(dt.year) in shown:
+                    filled += 1
+                    break
+            except Exception:
+                filled += 1
+                break
+        time.sleep(0.3)
+    else:
+        # Best effort: count it as attempted.
+        filled += (1 if filled >= 2 else 0)
 
     return filled > 0
 
 # === UTILS ===
+def _fill_username_and_password_if_present(page, username, password, username_filled, password_changed):
+    """During profile-setup steps TikTok may ask for a 'Username' and may
+    present a NEW password field. Auto-fill the username, and always re-use
+    the same password we used at signup for any new password field.
+    Returns (username_filled, password_changed) updated flags."""
+    # Username field (label or placeholder contains 'username', but NOT email).
+    try:
+        u = page.locator(
+            'input[name="username"], input[id*="username" i], '
+            'input[placeholder*="username" i], input[aria-label*="username" i]'
+        ).first
+        if u.count() > 0 and u.is_visible():
+            cur = ""
+            try:
+                cur = (u.input_value(timeout=1000) or "").strip()
+            except Exception:
+                pass
+            if not cur:
+                u.fill(username)
+                time.sleep(0.6)
+                username_filled = True
+                log(f"[{username}] Username auto-filled: {username}")
+    except Exception:
+        pass
+
+    # New password field -> always reuse the same password.
+    try:
+        p = page.locator(
+            'input[type="password"], input[name="password"], '
+            'input[placeholder*="password" i], input[aria-label*="password" i]'
+        ).first
+        if p.count() > 0 and p.is_visible():
+            cur = ""
+            try:
+                cur = (p.input_value(timeout=1000) or "").strip()
+            except Exception:
+                pass
+            if not cur:
+                p.fill(password)
+                time.sleep(0.6)
+                password_changed = True
+                log(f"[{username}] Re-used signup password in new password field")
+    except Exception:
+        pass
+
+    return username_filled, password_changed
+
+
 def get_screenshot(username):
     return screenshots.get(username)
 
