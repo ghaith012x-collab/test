@@ -731,46 +731,62 @@ def signup_tiktok(username, email, password, dob, tor_port_offset=0, auto_passwo
         # A consent/confirmation dialog may appear before submitting.
         click_continue_if_present(page, username)
 
-        take_screenshot(username)
-
         # Wait 5 seconds after all fields are filled so the form settles
         # (TikTok enables "Send code" only once DOB/email/password are valid).
         log(f"[{username}] Waiting 5s after filling fields before Send code")
         time.sleep(5)
 
-        # Click "Send code" accurately, retried up to 3 times, once every
-        # ~10 seconds, in case the button is't immediately ready.
+        # Coordinate-based click: find the "Send code" button via JS, read its
+        # bounding-box center, and click that exact pixel with the mouse. This
+        # avoids Playwright's actionability checks that can silently miss it.
+        def _click_send_by_coords():
+            # Returns True if a Send-code/submit button was found and clicked.
+            js = r"""
+            () => {
+                const labels = ["send code","send","continue","sign up","signup","next","submit"];
+                const els = Array.from(document.querySelectorAll('button, [role="button"], input[type="submit"], a[role="button"]'));
+                for (const el of els) {
+                    const t = (el.innerText || el.textContent || el.value || el.getAttribute('aria-label') || '').trim().toLowerCase();
+                    if (t && labels.some(l => t.includes(l))) {
+                        const r = el.getBoundingClientRect();
+                        if (r.width > 0 && r.height > 0) {
+                            return {x: r.x + r.width/2, y: r.y + r.height/2, t: el.innerText || el.textContent || el.value || ''};
+                        }
+                    }
+                }
+                return null;
+            }
+            """
+            try:
+                box = page.evaluate(js)
+            except Exception as e:
+                log(f"[{username}] Send-code coord eval error: {e}")
+                return False
+            if not box:
+                return False
+            try:
+                page.mouse.move(box["x"], box["y"])
+                page.mouse.click(box["x"], box["y"])
+                log(f"[{username}] Clicked (coords) button: '{box.get('t','').strip()}' at ({int(box['x'])},{int(box['y'])})")
+                return True
+            except Exception as e:
+                log(f"[{username}] Mouse click error: {e}")
+                return False
+
         send_clicked = False
         for attempt in range(3):
             try:
                 click_continue_if_present(page, username)
-                # Broad, case-insensitive match for the Send code button.
-                send_code = page.locator(
-                    'button:has-text("Send code"), button:has-text("Send Code"), '
-                    'button:has-text("SEND CODE"), [role="button"]:has-text("Send")'
-                ).first
-                if send_code.count() > 0 and send_code.is_visible():
-                    send_code.click(timeout=5000)
-                    log(f"[{username}] Clicked Send code (attempt {attempt+1})")
+                if _click_send_by_coords():
                     send_clicked = True
                     time.sleep(3)
                     break
                 else:
-                    log(f"[{username}] Send code button not visible yet (attempt {attempt+1})")
+                    log(f"[{username}] Send code button not found yet (attempt {attempt+1})")
             except Exception as e:
                 log(f"[{username}] Send code error (attempt {attempt+1}): {e}")
             if attempt < 2:
                 time.sleep(10)
-        if not send_clicked:
-            # Final fallback: submit-type / Next button.
-            try:
-                submit = page.locator('button[type="submit"], button:has-text("Sign up"), button:has-text("Sign Up"), button:has-text("Next")').first
-                if submit.count() > 0 and submit.is_visible():
-                    submit.click(timeout=5000)
-                    log(f"[{username}] Clicked submit fallback (no Send code found)")
-                    send_clicked = True
-            except Exception as e:
-                log(f"[{username}] Submit fallback error: {e}")
         if not send_clicked:
             log(f"[{username}] WARNING: could not click Send code after 3 attempts")
 
