@@ -22,7 +22,7 @@ def health():
 @app.route("/api/start", methods=["POST"])
 def api_start():
     data = request.get_json() or {}
-    username = data.get("username", "test_user").strip() or "test_user"
+    username = "test_user"
     email = data.get("email", "zeroghaith2012@gmail.com").strip()
     auto_password = bool(data.get("auto_password", True))
     auto_dob = bool(data.get("auto_dob", True))

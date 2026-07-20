@@ -638,39 +638,18 @@ def signup_tiktok(username, email, password, dob, tor_port_offset=0, auto_passwo
     page = session["page"]
     
     try:
-        # Go to TikTok signup
-        page.goto("https://www.tiktok.com/signup", timeout=30000)
+        # Go directly to the email signup flow so DOB / email / password are
+        # collected on a single page (no extra "Sign up" landing nav needed).
+        page.goto("https://www.tiktok.com/signup/phone-or-email/email", timeout=30000)
         page.wait_for_load_state("domcontentloaded", timeout=15000)
         time.sleep(3)
         take_screenshot(username)
-        
+
         # Handle initial popups
         _dismiss_blockers(page, username)
         handle_captcha_if_present(page, username)
-        
-        # Fill email
-        try:
-            email_input = page.locator('input[type="email"], input[name="email"], input[placeholder*="email" i]').first
-            if email_input.count() > 0:
-                email_input.wait_for(state="visible", timeout=8000)
-                email_input.fill(email)
-                time.sleep(random.uniform(0.5, 1.5))
-                log(f"[{username}] Email filled")
-        except Exception as e:
-            log(f"[{username}] Email fill error: {e}")
-        
-        # Fill password
-        try:
-            pass_input = page.locator('input[type="password"], input[name="password"]').first
-            if pass_input.count() > 0:
-                pass_input.wait_for(state="visible", timeout=8000)
-                pass_input.fill(password)
-                time.sleep(random.uniform(0.5, 1.5))
-                log(f"[{username}] Password filled")
-        except Exception as e:
-            log(f"[{username}] Password fill error: {e}")
-        
-        # Fill DOB (dropdowns or native date input)
+
+        # Fill DOB first (dropdowns or native date input)
         if dob:
             try:
                 if not _fill_dob_selectors(page, dob):
@@ -682,23 +661,47 @@ def signup_tiktok(username, email, password, dob, tor_port_offset=0, auto_passwo
                 time.sleep(random.uniform(0.5, 1.2))
             except Exception as e:
                 log(f"[{username}] DOB fill error: {e}")
-        
-        # Click Sign up / submit on the account-details step.
+
+        # Fill email
         try:
-            submit = page.locator('button[type="submit"], button:has-text("Sign up"), button:has-text("Sign Up")').first
-            if submit.count() > 0 and submit.is_visible():
-                submit.click(timeout=5000)
-                log(f"[{username}] Clicked Sign up")
+            email_input = page.locator('input[type="email"], input[name="email"], input[placeholder*="email" i]').first
+            if email_input.count() > 0:
+                email_input.wait_for(state="visible", timeout=8000)
+                email_input.fill(email)
+                time.sleep(random.uniform(0.5, 1.5))
+                log(f"[{username}] Email filled")
+        except Exception as e:
+            log(f"[{username}] Email fill error: {e}")
+
+        # Fill password
+        try:
+            pass_input = page.locator('input[type="password"], input[name="password"]').first
+            if pass_input.count() > 0:
+                pass_input.wait_for(state="visible", timeout=8000)
+                pass_input.fill(password)
+                time.sleep(random.uniform(0.5, 1.5))
+                log(f"[{username}] Password filled")
+        except Exception as e:
+            log(f"[{username}] Password fill error: {e}")
+
+        take_screenshot(username)
+
+        # After DOB + email + password are entered, click "Send code".
+        try:
+            send_code = page.locator('button:has-text("Send code"), button:has-text("Send Code")').first
+            if send_code.count() > 0 and send_code.is_visible():
+                send_code.click(timeout=5000)
+                log(f"[{username}] Clicked Send code")
                 time.sleep(2)
             else:
-                # Fallback: any primary submit-style button.
-                alt = page.locator('button:has-text("Next")').first
-                if alt.count() > 0 and alt.is_visible():
-                    alt.click(timeout=5000)
-                    log(f"[{username}] Clicked Next (submit fallback)")
+                # Fallback: any primary submit-style button (Sign up / Next).
+                submit = page.locator('button[type="submit"], button:has-text("Sign up"), button:has-text("Sign Up"), button:has-text("Next")').first
+                if submit.count() > 0 and submit.is_visible():
+                    submit.click(timeout=5000)
+                    log(f"[{username}] Clicked submit (Send code fallback)")
                     time.sleep(2)
         except Exception as e:
-            log(f"[{username}] Submit error: {e}")
+            log(f"[{username}] Send code error: {e}")
 
         take_screenshot(username)
 
