@@ -321,7 +321,16 @@ $("startForm").addEventListener("submit", (e) => {
     method: "POST", headers: {"Content-Type": "application/json"},
     body: JSON.stringify(payload)
   })
-    .then(r => r.json())
+    .then(async r => {
+      let text = "";
+      try { text = await r.text(); } catch (e) { text = ""; }
+      let d = null;
+      try { d = JSON.parse(text); } catch (e) {
+        logLine("START RESPONSE (non-JSON, status " + r.status + "): " + text.slice(0, 500), "err");
+        throw new Error("Invalid JSON from server (status " + r.status + ")");
+      }
+      return d;
+    })
     .then(d => {
       if (d.error) { $("formMsg").textContent = d.error; logLine("ERROR: " + d.error, "err"); $("startBtn").disabled = false; return; }
       currentUser = d.username;

@@ -1,10 +1,21 @@
-import os, sys, json, threading, time
+import os, sys, json, threading, time, logging
 from flask import Flask, render_template, jsonify, request, Response
 from bot import (
     start_worker, stop_worker, get_screenshot, get_worker_status,
     workers, screenshots, last_frame_ts, browser_sessions, create_placeholder,
     generate_password, generate_dob, generate_username,
 )
+
+# === DEBUG LOGGING ===
+logging.basicConfig(
+    level=logging.DEBUG,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    stream=sys.stdout,
+)
+log = logging.getLogger("app")
+
+# Silence Flask's per-request access logs (the noisy GET /live/... lines).
+logging.getLogger("werkzeug").setLevel(logging.WARNING)
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.urandom(24)
