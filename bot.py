@@ -761,26 +761,42 @@ def signup_tiktok(username, email, password, dob, tor_port_offset=0, auto_passwo
     # Start a fresh Tor instance -> brand-new exit IP for this worker run.
     tor_proc, tor_port, _ = _start_tor_instance(username, port_offset=tor_port_offset)
     tor_socks = tor_port if tor_port else None
+
+    # Verify the Tor circuit can actually reach the internet BEFORE routing
+    # the browser through it. If it can't (broken/slow in this env),
+    # fall back to a direct connection so navigation doesn't hang.
     if tor_socks:
-        # Read the public IP in the background so a slow Tor bootstrap
-        # never blocks the signup flow. Failures are logged only.
-        def _log_tor_ip():
-            try:
-                import socks  # validates SOCKS support (PySocks)
-                pub = requests.get("https://api.ipify.org", proxies={
-                    "http": f"socks5://127.0.0.1:{tor_socks}",
-                    "https": f"socks5://127.0.0.1:{tor_socks}",
-                }, timeout=20).text.strip()
-                log(f"[{username}] Connected via Tor — public IP: {pub}")
-            except ImportError:
-                log(f"[{username}] Tor SOCKS active (PySocks not installed; IP check skipped).")
-            except Exception as e:
-                log(f"[{username}] Tor IP check skipped: {e}")
-        threading.Thread(target=_log_tor_ip, daemon=True).start()
+        tor_ok = False
+        try:
+            import socks  # validates SOCKS support (PySocks)
+            r = requests.get("https://www.tiktok.com/",
+                            proxies={"http": f"socks5://127.0.0.1:{tor_socks}",
+                                     "https": f"socks5://127.0.0.1:{tor_socks}"},
+                            timeout=12)
+            tor_ok = (r.status_code < 500)
+        except Exception as e:
+            log(f"[{username}] Tor reachability check failed: {e}")
+            tor_ok = False
+        if tor_ok:
+            # Log the exit IP in the background (non-blocking).
+            def _log_tor_ip():
+                try:
+                    pub = requests.get("https://api.ipify.org",
+                                    proxies={"http": f"socks5://127.0.0.1:{tor_socks}",
+                                             "https": f"socks5://127.0.0.1:{tor_socks}"},
+                                    timeout=20).text.strip()
+                    log(f"[{username}] Connected via Tor — public IP: {pub}")
+                except Exception as e:
+                    log(f"[{username}] Tor IP check skipped: {e}")
+            threading.Thread(target=_log_tor_ip, daemon=True).start()
+        else:
+            log(f"[{username}] Tor circuit unreachable — connecting directly.")
+            _stop_tor_instance(username)
+            tor_socks = None
     else:
         log(f"[{username}] Tor unavailable — connecting directly.")
 
-    # Start browser (routed through Tor when available)
+    # Start browser (routed through Tor when the circuit is reachable)
     try:
         session = _start_browser_session(username, tor_socks_port=tor_socks)
     except Exception as e:
@@ -792,7 +808,8 @@ def signup_tiktok(username, email, password, dob, tor_port_offset=0, auto_passwo
     try:
         # Go directly to the email signup flow so DOB / email / password are
         # collected on a single page (no extra "Sign up" landing nav needed).
-        page.goto("https://www.tiktok.com/signup/phone-or-email/email", timeout=30000)
+        page.goto("https://www.tiktok.com/signup/phone-or-email/email",
+                   timeout=45000, wait_until="domcontentloaded")
         page.wait_for_load_state("domcontentloaded", timeout=15000)
         time.sleep(3)
         take_screenshot(username)

@@ -157,7 +157,7 @@
       <div class="body">
         <div class="live-wrap">
           <span class="live-tag"><span class="dot" id="liveDot"></span>LIVE</span>
-          <img id="liveImg" alt="live feed" src="/live/test_user" />
+          <img id="liveImg" alt="live feed" src="/live/test_user" onerror="this.dataset.err=(+this.dataset.err||0)+1; if(this.dataset.err<4) setTimeout(()=>updateLive(), 1500);" />
         </div>
         <p class="hint" id="feedHint">Start a worker to begin streaming the browser session.</p>
       </div>
@@ -277,6 +277,7 @@ function setStatus(state, text) {
 
 function updateLive() {
   const img = $("liveImg");
+  img.onload = () => { img.dataset.err = 0; };
   img.src = "/live/" + encodeURIComponent(currentUser) + "?t=" + Date.now();
 }
 
