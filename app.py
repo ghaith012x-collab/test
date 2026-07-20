@@ -14,6 +14,11 @@ app.config['SECRET_KEY'] = os.urandom(24)
 def index():
     return render_template("site.html")
 
+@app.route("/healthz")
+@app.route("/health")
+def health():
+    return jsonify({"status": "ok"}), 200
+
 @app.route("/api/start", methods=["POST"])
 def api_start():
     data = request.get_json() or {}
