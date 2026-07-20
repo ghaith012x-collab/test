@@ -35,7 +35,7 @@ def api_start():
     try:
         data = request.get_json() or {}
         username = "test_user"
-        email = data.get("email", "zeroghaith2012@gmail.com").strip()
+        email = data.get("email", "").strip()
         auto_password = bool(data.get("auto_password", True))
         auto_dob = bool(data.get("auto_dob", True))
         password = data.get("password", "") if not auto_password else ""

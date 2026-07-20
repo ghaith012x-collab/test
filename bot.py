@@ -608,11 +608,13 @@ def handle_content_check_dialog(page, username=""):
         return False
 
 # === GMAIL OTP FETCHER ===
-def get_gmail_otp(gmail_user="zeroghaith2012@gmail.com", gmail_pass=None, timeout=120):
+def get_gmail_otp(gmail_user=None, gmail_pass=None, timeout=120):
+    if not gmail_user:
+        gmail_user = os.environ.get("GMAIL_USER")
     if not gmail_pass:
         gmail_pass = os.environ.get("GMAIL_APP_PASSWORD")
-    if not gmail_pass:
-        print("[OTP] No Gmail password configured")
+    if not gmail_user or not gmail_pass:
+        print("[OTP] No Gmail credentials configured (set GMAIL_USER / GMAIL_APP_PASSWORD)")
         return None
     
     try:
@@ -732,21 +734,34 @@ def signup_tiktok(username, email, password, dob, tor_port_offset=0, auto_passwo
         take_screenshot(username)
 
         # After DOB + email + password are entered, click "Send code".
-        try:
-            send_code = page.locator('button:has-text("Send code"), button:has-text("Send Code")').first
-            if send_code.count() > 0 and send_code.is_visible():
-                send_code.click(timeout=5000)
-                log(f"[{username}] Clicked Send code")
-                time.sleep(2)
-            else:
-                # Fallback: any primary submit-style button (Sign up / Next).
-                submit = page.locator('button[type="submit"], button:has-text("Sign up"), button:has-text("Sign Up"), button:has-text("Next")').first
-                if submit.count() > 0 and submit.is_visible():
-                    submit.click(timeout=5000)
-                    log(f"[{username}] Clicked submit (Send code fallback)")
-                    time.sleep(2)
-        except Exception as e:
-            log(f"[{username}] Send code error: {e}")
+        # Retry up to 3 times, once every ~10 seconds, in case the button
+        # isn't immediately ready or a dialog intercepts the first click.
+        send_clicked = False
+        for attempt in range(3):
+            try:
+                click_continue_if_present(page, username)
+                send_code = page.locator('button:has-text("Send code"), button:has-text("Send Code")').first
+                if send_code.count() > 0 and send_code.is_visible():
+                    send_code.click(timeout=5000)
+                    log(f"[{username}] Clicked Send code (attempt {attempt+1})")
+                    send_clicked = True
+                    time.sleep(3)
+                    break
+                else:
+                    # Fallback: any primary submit-style button (Sign up / Next).
+                    submit = page.locator('button[type="submit"], button:has-text("Sign up"), button:has-text("Sign Up"), button:has-text("Next")').first
+                    if submit.count() > 0 and submit.is_visible():
+                        submit.click(timeout=5000)
+                        log(f"[{username}] Clicked submit (Send code fallback, attempt {attempt+1})")
+                        send_clicked = True
+                        time.sleep(3)
+                        break
+            except Exception as e:
+                log(f"[{username}] Send code error (attempt {attempt+1}): {e}")
+            if attempt < 2:
+                time.sleep(10)
+        if not send_clicked:
+            log(f"[{username}] WARNING: could not click Send code after 3 attempts")
 
         take_screenshot(username)
 
@@ -797,7 +812,7 @@ def signup_tiktok(username, email, password, dob, tor_port_offset=0, auto_passwo
             # 2) Verification code required -> handle OTP, then re-check.
             if "verify" in body or "code" in body or "6-digit" in body or "enter the code" in body:
                 log(f"[{username}] Verification code required")
-                otp = get_gmail_otp(timeout=60)
+                otp = get_gmail_otp(gmail_user=email, timeout=60)
                 if otp:
                     log(f"[{username}] Auto-fetched OTP: {otp}")
                     try:

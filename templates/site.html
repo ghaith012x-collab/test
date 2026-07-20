@@ -173,7 +173,7 @@
           </div>
           <div class="field">
             <label for="email">Email</label>
-            <input type="email" id="email" value="zeroghaith2012@gmail.com" autocomplete="off" />
+            <input type="email" id="email" placeholder="you@example.com" autocomplete="off" />
           </div>
 
           <div class="auto-row">
@@ -306,7 +306,7 @@ $("startForm").addEventListener("submit", (e) => {
   const autoDob = $("autoDob").checked;
   const payload = {
     username: autoUser ? "" : $("username").value.trim(),
-    email: "zeroghaith2012@gmail.com",
+    email: $("email").value.trim() || "",
     password: autoCreds ? "" : $("password").value,
     dob: autoDob ? "" : $("dob").value,
     auto_username: autoUser,
