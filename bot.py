@@ -680,7 +680,11 @@ def signup_tiktok(username, email, password, dob, tor_port_offset=0, auto_passwo
         log(f"[{username}] Tor started on SOCKS {socks_port}, Control {control_port}")
 
     # Start browser (no proxy when Tor is unavailable)
-    session = _start_browser_session(username, tor_socks_port=socks_port)
+    try:
+        session = _start_browser_session(username, tor_socks_port=socks_port)
+    except Exception as e:
+        log(f"[{username}] FATAL: could not launch browser: {e}")
+        return False
     page = session["page"]
     
     try:
