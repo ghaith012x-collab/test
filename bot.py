@@ -742,19 +742,19 @@ def signup_tiktok(username, email, password, dob, tor_port_offset=0, auto_passwo
         # bounding-box center, and click that exact pixel with the mouse. This
         # avoids Playwright's actionability checks that can silently miss it.
         def _click_send_by_coords():
-            # Returns True if a Send-code/submit button was found and clicked.
+            # TikTok may render Send code as disabled until validation finishes.
             js = r"""
             () => {
-                const labels = ["send code","send","continue","sign up","signup","next","submit"];
-                const els = Array.from(document.querySelectorAll('button, [role="button"], input[type="submit"], a[role="button"]'));
+                const els = Array.from(document.querySelectorAll('button, [role="button"], input[type="submit"]'));
                 for (const el of els) {
                     const t = (el.innerText || el.textContent || el.value || el.getAttribute('aria-label') || '').trim().toLowerCase();
-                    if (t && labels.some(l => t.includes(l))) {
-                        const r = el.getBoundingClientRect();
-                        if (r.width > 0 && r.height > 0) {
-                            return {x: r.x + r.width/2, y: r.y + r.height/2, t: el.innerText || el.textContent || el.value || ''};
-                        }
-                    }
+                    const exact = t === 'send code';
+                    const fallback = ['send','continue','next','submit'].includes(t);
+                    if ((!exact && !fallback) || el.disabled || el.getAttribute('aria-disabled') === 'true') continue;
+                    const r = el.getBoundingClientRect(), cs = getComputedStyle(el);
+                    if (r.width <= 0 || r.height <= 0 || cs.visibility === 'hidden' || cs.display === 'none') continue;
+                    el.scrollIntoView({block: 'center', inline: 'center'});
+                    return {x: r.x + r.width/2, y: r.y + r.height/2, t: t};
                 }
                 return null;
             }
@@ -762,17 +762,16 @@ def signup_tiktok(username, email, password, dob, tor_port_offset=0, auto_passwo
             try:
                 box = page.evaluate(js)
             except Exception as e:
-                log(f"[{username}] Send-code coord eval error: {e}")
+                log(f"[{username}] Send-code lookup error: {e}")
                 return False
             if not box:
                 return False
             try:
-                page.mouse.move(box["x"], box["y"])
                 page.mouse.click(box["x"], box["y"])
-                log(f"[{username}] Clicked (coords) button: '{box.get('t','').strip()}' at ({int(box['x'])},{int(box['y'])})")
+                log(f"[{username}] Clicked enabled '{box.get('t','')}' button")
                 return True
             except Exception as e:
-                log(f"[{username}] Mouse click error: {e}")
+                log(f"[{username}] Send-code click error: {e}")
                 return False
 
         send_clicked = False
