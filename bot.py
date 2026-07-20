@@ -153,6 +153,35 @@ def _start_tor_instance(username, port_offset=0):
         return None, None, None
     _tor_instances[username] = (proc, socks_port, ctrl_port, data_dir)
     print(f"[{username}] Tor up on SOCKS 127.0.0.1:{socks_port} (fresh IP)")
+
+    # Wait for the circuit to actually bootstrap (the SOCKS port opens
+    # instantly, but Tor needs several seconds to build a working
+    # circuit). Without this, the browser's first request hangs.
+    try:
+        import socket
+        deadline = time.time() + 45
+        ready = False
+        while time.time() < deadline:
+            try:
+                with socket.create_connection(
+                    ("127.0.0.1", socks_port), timeout=2
+                ) as s:
+                    s.sendall(b"\x05\x01\x00")  # SOCKS5, no auth
+                    if s.recv(2)[:1] == b"\x05":
+                        ready = True
+                        break
+            except Exception:
+                pass
+            time.sleep(1.5)
+        if not ready:
+            print(f"[{username}] Tor circuit did not bootstrap in time; using direct")
+            try: proc.terminate()
+            except Exception: pass
+            _tor_instances.pop(username, None)
+            return None, None, None
+    except Exception:
+        pass
+
     return proc, socks_port, None
 
 def _stop_tor_instance(username):
@@ -733,14 +762,21 @@ def signup_tiktok(username, email, password, dob, tor_port_offset=0, auto_passwo
     tor_proc, tor_port, _ = _start_tor_instance(username, port_offset=tor_port_offset)
     tor_socks = tor_port if tor_port else None
     if tor_socks:
-        try:
-            pub = requests.get("https://api.ipify.org", proxies={
-                "http": f"socks5://127.0.0.1:{tor_socks}",
-                "https": f"socks5://127.0.0.1:{tor_socks}",
-            }, timeout=15).text.strip()
-            log(f"[{username}] Connected via Tor — public IP: {pub}")
-        except Exception as e:
-            log(f"[{username}] Could not read Tor IP: {e}")
+        # Read the public IP in the background so a slow Tor bootstrap
+        # never blocks the signup flow. Failures are logged only.
+        def _log_tor_ip():
+            try:
+                import socks  # validates SOCKS support (PySocks)
+                pub = requests.get("https://api.ipify.org", proxies={
+                    "http": f"socks5://127.0.0.1:{tor_socks}",
+                    "https": f"socks5://127.0.0.1:{tor_socks}",
+                }, timeout=20).text.strip()
+                log(f"[{username}] Connected via Tor — public IP: {pub}")
+            except ImportError:
+                log(f"[{username}] Tor SOCKS active (PySocks not installed; IP check skipped).")
+            except Exception as e:
+                log(f"[{username}] Tor IP check skipped: {e}")
+        threading.Thread(target=_log_tor_ip, daemon=True).start()
     else:
         log(f"[{username}] Tor unavailable — connecting directly.")
 
