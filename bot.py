@@ -35,17 +35,27 @@ screenshots = {}
 last_frame_ts = {}
 
 # === LOGGING ===
-def log(msg):
-    print(msg, flush=True)
-
-def _log_event(username, message):
-    ts = datetime.now().strftime("%H:%M:%S")
-    print(f"[{username}] {message}")
+def _persist(username, message):
     try:
         from database import append_log
         append_log(username, message)
     except Exception:
         pass
+
+def log(msg, username=""):
+    print(msg, flush=True)
+    # Auto-detect a "[user] ..." prefix so callers don't have to pass username.
+    if not username:
+        m = re.match(r"^\[([^\]]+)\]\s", str(msg))
+        if m:
+            username = m.group(1)
+    if username:
+        _persist(username, str(msg))
+
+def _log_event(username, message):
+    ts = datetime.now().strftime("%H:%M:%S")
+    print(f"[{username}] {message}")
+    _persist(username, message)
 
 # === SCREENSHOT / LIVE CAM ===
 def create_placeholder(username, text):
@@ -872,6 +882,16 @@ def generate_password(length=14):
     pwd += [random.choice(all_chars) for _ in range(length - 3)]
     random.shuffle(pwd)
     return "".join(pwd)
+
+def generate_username():
+    """Generate a TikTok-style handle like 'user.8f3k2'."""
+    adjectives = ["cool", "tiny", "lunar", "neon", "vibe", "pixel", "storm",
+                  "ghost", "frost", "echo", "nova", "drift", "cyber", "lazy"]
+    nouns = ["panda", "wolf", "comet", "tiger", "mango", "raven", "kitty",
+             "fox", "ninja", "bot", "star", "moon", "wave", "leaf"]
+    base = f"{random.choice(adjectives)}{random.choice(nouns)}"
+    suffix = "".join(random.choice("abcdefghijklmnopqrstuvwxyz0123456789") for _ in range(4))
+    return f"{base}{suffix}"
 
 def generate_dob(min_age=18, max_age=45):
     """Return a random DOB (ISO date) making the user old enough to register."""

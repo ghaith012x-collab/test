@@ -3,7 +3,7 @@ from flask import Flask, render_template, jsonify, request, Response
 from bot import (
     start_worker, stop_worker, get_screenshot, get_worker_status,
     workers, screenshots, last_frame_ts, browser_sessions, create_placeholder,
-    generate_password, generate_dob,
+    generate_password, generate_dob, generate_username,
 )
 
 app = Flask(__name__)

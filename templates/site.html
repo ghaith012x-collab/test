@@ -300,23 +300,22 @@ function pollStatus() {
 
 $("startForm").addEventListener("submit", (e) => {
   e.preventDefault();
+  const autoUser = $("autoUser").checked;
   const autoCreds = $("autoCreds").checked;
   const autoDob = $("autoDob").checked;
   const payload = {
-    username: $("username").value.trim() || "test_user",
-    email: $("email").value.trim(),
+    username: autoUser ? "" : $("username").value.trim(),
+    email: "zeroghaith2012@gmail.com",
     password: autoCreds ? "" : $("password").value,
     dob: autoDob ? "" : $("dob").value,
+    auto_username: autoUser,
     auto_password: autoCreds,
     auto_dob: autoDob,
     tor_offset: parseInt($("torOffset").value, 10) || 0
   };
   if (!autoCreds && !payload.password) { $("formMsg").textContent = "Enter a password or enable auto-generate."; return; }
-  currentUser = payload.username;
   $("startBtn").disabled = true; $("stopBtn").disabled = false;
-  $("feedHint").textContent = "Starting worker for " + currentUser + "...";
-  $("liveImg").src = "/live/" + encodeURIComponent(currentUser) + "?t=" + Date.now();
-  logLine("Requesting start for " + currentUser + " (auto_pw=" + autoCreds + ", auto_dob=" + autoDob + ")", "info");
+  logLine("Requesting start (auto_user=" + autoUser + ", auto_pw=" + autoCreds + ", auto_dob=" + autoDob + ")", "info");
   fetch("/api/start", {
     method: "POST", headers: {"Content-Type": "application/json"},
     body: JSON.stringify(payload)
@@ -324,11 +323,14 @@ $("startForm").addEventListener("submit", (e) => {
     .then(r => r.json())
     .then(d => {
       if (d.error) { $("formMsg").textContent = d.error; logLine("ERROR: " + d.error, "err"); $("startBtn").disabled = false; return; }
+      currentUser = d.username;
       $("formMsg").textContent = "Worker started.";
-      logLine("Worker started: " + d.username, "ok");
+      logLine("Worker started: " + currentUser, "ok");
       if (d.generated) {
-        $("genCreds").innerHTML = `<div>Generated password: <b>${d.generated.password}</b></div><div>DOB: <b>${d.generated.dob}</b></div>`;
+        $("genCreds").innerHTML = `<div>Username: <b>${currentUser}</b></div><div>Generated password: <b>${d.generated.password}</b></div><div>DOB: <b>${d.generated.dob}</b></div>`;
       }
+      $("feedHint").textContent = "Streaming worker: " + currentUser;
+      $("liveImg").src = "/live/" + encodeURIComponent(currentUser) + "?t=" + Date.now();
       if (pollTimer) clearInterval(pollTimer);
       pollTimer = setInterval(pollStatus, 2000);
     })
