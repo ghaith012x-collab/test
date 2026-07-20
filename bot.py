@@ -881,11 +881,15 @@ def generate_username():
              "fox", "ninja", "bot", "star", "moon", "wave", "leaf", "phoenix",
              "dragon", "falcon", "otter", "lynx", "bison", "heron", "cobra"]
     import uuid
+    MAX = 24  # TikTok username hard limit
     base = f"{random.choice(adjectives)}{random.choice(adjectives)}{random.choice(nouns)}"
-    # 10-char random suffix + 4-char uuid fragment => ~14 chars of entropy
+    # Reserve 15 chars for the random suffix; trim the readable base if needed.
+    if len(base) > MAX - 15:
+        base = base[:MAX - 15]
     suffix = "".join(random.choice("abcdefghijklmnopqrstuvwxyz0123456789") for _ in range(10))
     frag = uuid.uuid4().hex[:4]
-    return f"{base}_{suffix}{frag}"
+    handle = f"{base}_{suffix}{frag}"
+    return handle[:MAX]  # hard cap, never exceeds TikTok limit
 
 def generate_dob(min_age=18, max_age=45):
     """Return a random DOB (ISO date) making the user old enough to register."""
