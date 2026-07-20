@@ -110,11 +110,15 @@ def _start_tor_instance(username, port_offset=0):
         f.write("MaxCircuitDirtiness 10\n")
     
     tor_path = os.environ.get("TOR_PATH", "tor")
-    proc = subprocess.Popen(
-        [tor_path, "-f", torrc_path],
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL
-    )
+    try:
+        proc = subprocess.Popen(
+            [tor_path, "-f", torrc_path],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL
+        )
+    except FileNotFoundError:
+        log(f"[{username}] Tor binary '{tor_path}' not found — continuing without Tor proxy.")
+        return None, None, None
     time.sleep(3)
     return proc, socks_port, control_port
 
@@ -596,11 +600,14 @@ def signup_tiktok(username, email, password, dob, tor_port_offset=0, auto_passwo
         dob = generate_dob()
         log(f"[{username}] Auto-selected DOB: {dob}")
     
-    # Start Tor
+    # Start Tor (falls back to None when the tor binary is unavailable)
     tor_proc, socks_port, control_port = _start_tor_instance(username, tor_port_offset)
-    log(f"[{username}] Tor started on SOCKS {socks_port}, Control {control_port}")
-    
-    # Start browser
+    if tor_proc is None:
+        log(f"[{username}] Running WITHOUT Tor proxy (direct connection).")
+    else:
+        log(f"[{username}] Tor started on SOCKS {socks_port}, Control {control_port}")
+
+    # Start browser (no proxy when Tor is unavailable)
     session = _start_browser_session(username, tor_socks_port=socks_port)
     page = session["page"]
     
