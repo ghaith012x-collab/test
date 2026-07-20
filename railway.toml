@@ -4,7 +4,5 @@ buildCommand = "bash build.sh"
 
 [deploy]
 startCommand = "bash start.sh"
-healthcheckPath = "/healthz"
-healthcheckTimeout = 120
 restartPolicyType = "on_failure"
 restartPolicyMaxRetries = 10
