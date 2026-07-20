@@ -909,7 +909,14 @@ def generate_dob(min_age=18, max_age=45):
     return birth.isoformat()
 
 def _fill_dob_selectors(page, dob):
-    """Fill the TikTok date-of-birth UI which uses month/day/year dropdowns."""
+    """Fill the TikTok date-of-birth UI which uses three custom dropdown
+    selectors (Month / Day / Year) rendered as divs, e.g.
+
+    #loginContainer ... DivAgeSelector > div:nth-child(1|2|3) > DivSelectLabel
+
+    Each dropdown opens a panel of options we click by visible text.
+    Index 0 = month, 1 = day, 2 = year.
+    """
     try:
         dt = datetime.strptime(dob, "%Y-%m-%d")
     except Exception:
@@ -919,65 +926,73 @@ def _fill_dob_selectors(page, dob):
                    "July", "August", "September", "October", "November", "December"]
     month_label = month_names[dt.month - 1]
 
-    selectors_by_field = {
-        "month": [
-            'select[name="birthMonth"], select[data-e2e*="month" i], select[aria-label*="month" i]',
-            'div[role="button"]:has-text("Month"), [data-e2e*="month" i]',
-        ],
-        "day": [
-            'select[name="birthDay"], select[data-e2e*="day" i], select[aria-label*="day" i]',
-            'div[role="button"]:has-text("Day"), [data-e2e*="day" i]',
-        ],
-        "year": [
-            'select[name="birthYear"], select[data-e2e*="year" i], select[aria-label*="year" i]',
-            'div[role="button"]:has-text("Year"), [data-e2e*="year" i]',
-        ],
-    }
-    values = {
-        "month": [str(dt.month), month_label, f"{dt.month:02d}"],
-        "day": [str(dt.day), f"{dt.day:02d}"],
-        "year": [str(dt.year)],
-    }
+    # Option text candidates per field.
+    month_candidates = [month_label, str(dt.month), f"{dt.month:02d}"]
+    day_candidates = [str(dt.day), f"{dt.day:02d}"]
+    year_candidates = [str(dt.year)]
 
-    filled = 0
-    for field, sels in selectors_by_field.items():
-        for sel in sels:
+    # Candidate containers, most specific first.
+    age_container = page.locator('[class*="DivAgeSelector"], [class*="AgeSelector"]').first
+    if age_container.count() == 0:
+        # Broader fallback.
+        age_container = page.locator('form div[class*="Selector"], form div[class*="selector"]').first
+
+    def _field_container(idx):
+        if age_container.count() > 0:
             try:
-                el = page.locator(sel).first
-                if el.count() == 0 or not el.is_visible():
-                    continue
-                tag = (el.evaluate("e => e.tagName.toLowerCase()") or "")
-                if tag == "select":
-                    for v in values[field]:
-                        try:
-                            el.select_option(label=v, timeout=1500)
-                            filled += 1
-                            break
-                        except Exception:
-                            pass
-                        try:
-                            el.select_option(value=v, timeout=1500)
-                            filled += 1
-                            break
-                        except Exception:
-                            pass
-                else:
-                    el.click(timeout=1500)
+                node = age_container.locator('> div').nth(idx)
+                if node.count() > 0:
+                    return node
+            except Exception:
+                pass
+        # Fallback: nth-child by index anywhere in the form area.
+        return page.locator('form > div > div').nth(idx)
+
+    def _pick(idx, candidates):
+        container = _field_container(idx)
+        if container.count() == 0:
+            return False
+        try:
+            # Click the select label to open the dropdown.
+            opener = container.locator('div[class*="SelectLabel"], div[role="button"], div').first
+            opener.click(timeout=2000)
+            time.sleep(0.5)
+        except Exception:
+            return False
+
+        # The option panel is typically a sibling/popup with role option or items.
+        for cand in candidates:
+            try:
+                opt = page.locator(
+                    f'[role="option"]:has-text("{cand}"), '
+                    f'li:has-text("{cand}"), '
+                    f'div[class*="Option"]:has-text("{cand}"), '
+                    f'div[class*="option"]:has-text("{cand}"), '
+                    f'span:has-text("{cand}")'
+                ).first
+                if opt.count() > 0 and opt.is_visible():
+                    opt.click(timeout=2000)
                     time.sleep(0.4)
-                    for v in values[field]:
-                        try:
-                            opt = page.locator(f'div[role="option"]:has-text("{v}"), li:has-text("{v}"), [role="option"]:has-text("{v}")').first
-                            if opt.count() > 0 and opt.is_visible():
-                                opt.click(timeout=1500)
-                                filled += 1
-                                break
-                        except Exception:
-                            pass
-                if filled > 0:
-                    time.sleep(0.4)
-                break
+                    return True
             except Exception:
                 continue
+        # Close an accidentally opened panel if nothing matched.
+        try:
+            page.keyboard.press("Escape")
+        except Exception:
+            pass
+        return False
+
+    filled = 0
+    if _pick(0, month_candidates):
+        filled += 1
+    time.sleep(0.3)
+    if _pick(1, day_candidates):
+        filled += 1
+    time.sleep(0.3)
+    if _pick(2, year_candidates):
+        filled += 1
+
     return filled > 0
 
 # === UTILS ===
