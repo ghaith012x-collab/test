@@ -461,6 +461,39 @@ def handle_captcha_if_present(page, username=""):
         return False
 
 # === POPUP HANDLERS ===
+def click_continue_if_present(page, username="", max_wait=8):
+    """Click any visible 'Continue' button. TikTok shows confirmation/consent
+    dialogs ('Continue') that must be acknowledged to advance the flow."""
+    if page is None:
+        return False
+    clicked = False
+    end = time.time() + max_wait
+    while time.time() < end:
+        try:
+            btn = page.locator('button:has-text("Continue"), button:has-text("CONTINUE"), [role="button"]:has-text("Continue")').first
+            if btn.count() > 0 and btn.is_visible():
+                btn.click(timeout=3000, no_wait_after=True)
+                clicked = True
+                log(f"[{username}] Clicked Continue")
+                time.sleep(1.2)
+                # Keep checking in case multiple Continue steps appear.
+                continue
+        except Exception:
+            pass
+        # Also catch generic primary 'Continue' styled as a link/div.
+        try:
+            el = page.locator('div:has-text("Continue"), a:has-text("Continue")').first
+            if el.count() > 0 and el.is_visible() and el.evaluate("e => e.children.length === 0 or e.tagName.toLowerCase() !== 'div'"):
+                el.click(timeout=2000, no_wait_after=True)
+                clicked = True
+                log(f"[{username}] Clicked Continue (element)")
+                time.sleep(1.0)
+                continue
+        except Exception:
+            pass
+        break
+    return clicked
+
 def _dismiss_blockers(page, username=""):
     blockers = [
         'button[data-e2e="cookie_banner_button"]',
@@ -647,6 +680,7 @@ def signup_tiktok(username, email, password, dob, tor_port_offset=0, auto_passwo
 
         # Handle initial popups
         _dismiss_blockers(page, username)
+        click_continue_if_present(page, username)
         handle_captcha_if_present(page, username)
 
         # Fill DOB first (dropdowns or native date input)
@@ -684,6 +718,9 @@ def signup_tiktok(username, email, password, dob, tor_port_offset=0, auto_passwo
         except Exception as e:
             log(f"[{username}] Password fill error: {e}")
 
+        # A consent/confirmation dialog may appear before submitting.
+        click_continue_if_present(page, username)
+
         take_screenshot(username)
 
         # After DOB + email + password are entered, click "Send code".
@@ -705,6 +742,9 @@ def signup_tiktok(username, email, password, dob, tor_port_offset=0, auto_passwo
 
         take_screenshot(username)
 
+        # A confirmation/consent dialog may require clicking 'Continue'.
+        click_continue_if_present(page, username)
+
         # Handle post-submit captchas
         for _ in range(5):
             if _detect_tiktok_captcha(page):
@@ -718,6 +758,9 @@ def signup_tiktok(username, email, password, dob, tor_port_offset=0, auto_passwo
         success = False
         end = time.time() + 180  # up to 3 min to resolve
         while time.time() < end:
+            # Always acknowledge any 'Continue' dialog that appears.
+            click_continue_if_present(page, username)
+
             take_screenshot(username)
             body = (page.inner_text("body", timeout=3000) or "").lower()
 
@@ -900,12 +943,23 @@ def generate_username():
     return handle[:MAX]  # hard cap, never exceeds TikTok limit
 
 def generate_dob(min_age=18, max_age=45):
-    """Return a random DOB (ISO date) making the user old enough to register."""
+    """Return a random DOB (ISO date) making the user old enough to register.
+
+    Year is always forced below 2000 (no one born in 2000+).
+    """
     today = datetime.now().date()
-    max_birth = today.replace(year=today.year - min_age)
+    max_birth = today.replace(year=min(today.year - min_age, 1999))
+    # Hard cap the latest possible birth year at 1999.
+    if max_birth.year > 1999:
+        max_birth = max_birth.replace(year=1999)
     min_birth = today.replace(year=today.year - max_age)
+    if min_birth.year > 1999:
+        min_birth = min_birth.replace(year=1999)
     span_days = (max_birth - min_birth).days
     birth = min_birth + timedelta(days=random.randint(0, span_days))
+    # Final safety clamp.
+    if birth.year > 1999:
+        birth = birth.replace(year=1999)
     return birth.isoformat()
 
 def _fill_dob_selectors(page, dob):
