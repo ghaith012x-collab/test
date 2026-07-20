@@ -733,14 +733,22 @@ def signup_tiktok(username, email, password, dob, tor_port_offset=0, auto_passwo
 
         take_screenshot(username)
 
-        # After DOB + email + password are entered, click "Send code".
-        # Retry up to 3 times, once every ~10 seconds, in case the button
-        # isn't immediately ready or a dialog intercepts the first click.
+        # Wait 5 seconds after all fields are filled so the form settles
+        # (TikTok enables "Send code" only once DOB/email/password are valid).
+        log(f"[{username}] Waiting 5s after filling fields before Send code")
+        time.sleep(5)
+
+        # Click "Send code" accurately, retried up to 3 times, once every
+        # ~10 seconds, in case the button is't immediately ready.
         send_clicked = False
         for attempt in range(3):
             try:
                 click_continue_if_present(page, username)
-                send_code = page.locator('button:has-text("Send code"), button:has-text("Send Code")').first
+                # Broad, case-insensitive match for the Send code button.
+                send_code = page.locator(
+                    'button:has-text("Send code"), button:has-text("Send Code"), '
+                    'button:has-text("SEND CODE"), [role="button"]:has-text("Send")'
+                ).first
                 if send_code.count() > 0 and send_code.is_visible():
                     send_code.click(timeout=5000)
                     log(f"[{username}] Clicked Send code (attempt {attempt+1})")
@@ -748,18 +756,21 @@ def signup_tiktok(username, email, password, dob, tor_port_offset=0, auto_passwo
                     time.sleep(3)
                     break
                 else:
-                    # Fallback: any primary submit-style button (Sign up / Next).
-                    submit = page.locator('button[type="submit"], button:has-text("Sign up"), button:has-text("Sign Up"), button:has-text("Next")').first
-                    if submit.count() > 0 and submit.is_visible():
-                        submit.click(timeout=5000)
-                        log(f"[{username}] Clicked submit (Send code fallback, attempt {attempt+1})")
-                        send_clicked = True
-                        time.sleep(3)
-                        break
+                    log(f"[{username}] Send code button not visible yet (attempt {attempt+1})")
             except Exception as e:
                 log(f"[{username}] Send code error (attempt {attempt+1}): {e}")
             if attempt < 2:
                 time.sleep(10)
+        if not send_clicked:
+            # Final fallback: submit-type / Next button.
+            try:
+                submit = page.locator('button[type="submit"], button:has-text("Sign up"), button:has-text("Sign Up"), button:has-text("Next")').first
+                if submit.count() > 0 and submit.is_visible():
+                    submit.click(timeout=5000)
+                    log(f"[{username}] Clicked submit fallback (no Send code found)")
+                    send_clicked = True
+            except Exception as e:
+                log(f"[{username}] Submit fallback error: {e}")
         if not send_clicked:
             log(f"[{username}] WARNING: could not click Send code after 3 attempts")
 
