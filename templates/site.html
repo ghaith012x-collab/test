@@ -172,8 +172,8 @@
             <input type="text" id="username" value="test_user" autocomplete="off" disabled />
           </div>
           <div class="field">
-            <label for="email">Email (locked)</label>
-            <input type="email" id="email" value="zeroghaith2012@gmail.com" autocomplete="off" disabled />
+            <label for="email">Email</label>
+            <input type="email" id="email" placeholder="you@example.com" autocomplete="off" />
           </div>
 
           <div class="auto-row">
@@ -306,7 +306,7 @@ $("startForm").addEventListener("submit", (e) => {
   const autoDob = $("autoDob").checked;
   const payload = {
     username: autoUser ? "" : $("username").value.trim(),
-    email: "zeroghaith2012@gmail.com",
+    email: $("email").value.trim() || "",
     password: autoCreds ? "" : $("password").value,
     dob: autoDob ? "" : $("dob").value,
     auto_username: autoUser,
@@ -321,7 +321,16 @@ $("startForm").addEventListener("submit", (e) => {
     method: "POST", headers: {"Content-Type": "application/json"},
     body: JSON.stringify(payload)
   })
-    .then(r => r.json())
+    .then(async r => {
+      let text = "";
+      try { text = await r.text(); } catch (e) { text = ""; }
+      let d = null;
+      try { d = JSON.parse(text); } catch (e) {
+        logLine("START RESPONSE (non-JSON, status " + r.status + "): " + text.slice(0, 500), "err");
+        throw new Error("Invalid JSON from server (status " + r.status + ")");
+      }
+      return d;
+    })
     .then(d => {
       if (d.error) { $("formMsg").textContent = d.error; logLine("ERROR: " + d.error, "err"); $("startBtn").disabled = false; return; }
       currentUser = d.username;
