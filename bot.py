@@ -918,18 +918,25 @@ def stop_worker(username):
         del browser_sessions[username]
 
 # === CREDENTIAL GENERATION ===
-def generate_password(length=14):
-    """Generate a strong, TikTok-friendly password."""
+def generate_password(length=12):
+    """Generate a strong password that always contains at least one uppercase
+    letter, one lowercase letter, one digit, and one special character, with
+    a minimum length of 12."""
     lower = "abcdefghjkmnpqrstuvwxyz"
     upper = "ABCDEFGHJKLMNPQRSTUVWXYZ"
     digits = "23456789"
-    all_chars = lower + upper + digits
+    special = "!@#$%^&*?-_=+"
+    length = max(length, 12)
+
+    # Guarantee one of each required class.
     pwd = [
         random.choice(lower),
         random.choice(upper),
         random.choice(digits),
+        random.choice(special),
     ]
-    pwd += [random.choice(all_chars) for _ in range(length - 3)]
+    all_chars = lower + upper + digits + special
+    pwd += [random.choice(all_chars) for _ in range(length - len(pwd))]
     random.shuffle(pwd)
     return "".join(pwd)
 
