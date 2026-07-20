@@ -979,9 +979,8 @@ def _fill_dob_selectors(page, dob):
 
     #loginContainer ... DivAgeSelector > div:nth-child(1|2|3) > DivSelectLabel
 
-    Each dropdown opens a panel of options we click by visible text.
-    Index 0 = month, 1 = day, 2 = year. The year is verified to be the
-    requested one (TikTok defaults to a recent year if selection fails).
+    Index 0 = month, 1 = day, 2 = year. Each select label is clicked to
+    open its menu, then the matching option is clicked by exact text.
     """
     try:
         dt = datetime.strptime(dob, "%Y-%m-%d")
@@ -992,105 +991,74 @@ def _fill_dob_selectors(page, dob):
                    "July", "August", "September", "October", "November", "December"]
     month_label = month_names[dt.month - 1]
 
-    # Option text candidates per field.
-    month_candidates = [month_label, str(dt.month), f"{dt.month:02d}"]
-    day_candidates = [str(dt.day), f"{dt.day:02d}"]
-    year_candidates = [str(dt.year)]
+    candidates = [
+        [month_label, str(dt.month), f"{dt.month:02d}"],   # month
+        [str(dt.day), f"{dt.day:02d}"],                    # day
+        [str(dt.year)],                                     # year
+    ]
 
-    # Candidate containers, most specific first.
-    age_container = page.locator('[class*="DivAgeSelector"], [class*="AgeSelector"]').first
-    if age_container.count() == 0:
-        age_container = page.locator('form div[class*="Selector"], form div[class*="selector"]').first
+    # The age selector container holds the three select-label columns.
+    age = page.locator('[class*="DivAgeSelector"]').first
+    if age.count() == 0:
+        age = page.locator('[class*="AgeSelector"]').first
+    if age.count() == 0:
+        age = page.locator('form div[class*="Selector"]').first
 
-    def _field_container(idx):
-        if age_container.count() > 0:
-            try:
-                node = age_container.locator('> div').nth(idx)
-                if node.count() > 0:
-                    return node
-            except Exception:
-                pass
-        return page.locator('form > div > div').nth(idx)
-
-    def _options_panel():
-        # TikTok renders the open option list as a popup at the end of the
-        # age selector / form. Try the most likely containers.
-        for sel in [
-            '[role="listbox"], [role="menu"], [class*="DropdownMenu"], '
-            '[class*="SelectMenu"], [class*="OptionList"], [class*="Popup"]',
-        ]:
-            loc = page.locator(sel).first
-            if loc.count() > 0 and loc.is_visible():
-                return loc
-        # Fallback: any element with role=option anywhere.
-        opt = page.locator('[role="option"]').first
-        if opt.count() > 0:
-            return opt
-        return page
-
-    def _pick(idx, candidates, verify_text=None):
-        container = _field_container(idx)
-        if container.count() == 0:
+    def _select_column(idx, cands):
+        """Open column idx and pick one of the candidate texts."""
+        col = age.locator("> div").nth(idx)
+        if col.count() == 0:
             return False
+
+        opener = col.locator('[class*="SelectLabel"], [role="button"], div').first
         try:
-            opener = container.locator('div[class*="SelectLabel"], div[role="button"], div').first
             opener.click(timeout=2000)
-            time.sleep(0.6)
         except Exception:
-            return False
-
-        panel = _options_panel()
-        for cand in candidates:
             try:
-                opt = panel.locator(f'text="{cand}"').first
-                if opt.count() == 0:
-                    opt = panel.locator(f':has-text("{cand}")').first
-                if opt.count() > 0 and opt.is_visible():
-                    opt.scroll_into_view_if_needed(timeout=1500)
-                    opt.click(timeout=2000, force=True)
+                col.click(timeout=2000)
+            except Exception:
+                return False
+        time.sleep(0.7)
+
+        for cand in cands:
+            try:
+                item = page.locator(
+                    f'[role="option"]:text-is("{cand}"), '
+                    f'li:text-is("{cand}"), '
+                    f'div[class*="Option"]:text-is("{cand}"), '
+                    f'span:text-is("{cand}"), '
+                    f'a:text-is("{cand}")'
+                ).first
+                if item.count() == 0:
+                    item = page.locator(
+                        f'[role="option"]:has-text("{cand}"), li:has-text("{cand}")'
+                    ).first
+                if item.count() > 0 and item.is_visible():
+                    item.scroll_into_view_if_needed(timeout=1500)
+                    item.click(timeout=2000, force=True)
                     time.sleep(0.4)
-                    # Verify the dropdown now shows the chosen value.
-                    if verify_text:
-                        try:
-                            label = (container.inner_text(timeout=1500) or "").lower()
-                            if verify_text.lower() not in label:
-                                # Try other candidate spellings silently.
-                                pass
-                        except Exception:
-                            pass
                     return True
             except Exception:
                 continue
         try:
             page.keyboard.press("Escape")
+            time.sleep(0.3)
         except Exception:
             pass
         return False
 
     filled = 0
-    if _pick(0, month_candidates):
-        filled += 1
-    time.sleep(0.3)
-    if _pick(1, day_candidates):
-        filled += 1
-    time.sleep(0.3)
-    # Year: retry until it actually selects the requested year.
-    for attempt in range(3):
-        if _pick(2, year_candidates, verify_text=str(dt.year)):
-            # Re-open and confirm the label shows the right year.
-            try:
-                yc = _field_container(2)
-                shown = (yc.inner_text(timeout=1500) or "")
-                if str(dt.year) in shown:
-                    filled += 1
-                    break
-            except Exception:
+    for i in range(3):
+        if _select_column(i, candidates[i]):
+            filled += 1
+        time.sleep(0.4)
+
+    if filled < 3:
+        for _ in range(3):
+            if _select_column(2, candidates[2]):
                 filled += 1
                 break
-        time.sleep(0.3)
-    else:
-        # Best effort: count it as attempted.
-        filled += (1 if filled >= 2 else 0)
+            time.sleep(0.3)
 
     return filled > 0
 
