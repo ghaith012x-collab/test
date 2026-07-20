@@ -683,15 +683,20 @@ def signup_tiktok(username, email, password, dob, tor_port_offset=0, auto_passwo
             except Exception as e:
                 log(f"[{username}] DOB fill error: {e}")
         
-        # Click signup/submit
-        submitted = False
+        # Click Sign up / submit on the account-details step.
         try:
-            submit = page.locator('button[type="submit"], button:has-text("Sign up"), button:has-text("Next")').first
-            if submit.count() > 0:
+            submit = page.locator('button[type="submit"], button:has-text("Sign up"), button:has-text("Sign Up")').first
+            if submit.count() > 0 and submit.is_visible():
                 submit.click(timeout=5000)
-                submitted = True
-                log(f"[{username}] Submitted signup form")
+                log(f"[{username}] Clicked Sign up")
                 time.sleep(2)
+            else:
+                # Fallback: any primary submit-style button.
+                alt = page.locator('button:has-text("Next")').first
+                if alt.count() > 0 and alt.is_visible():
+                    alt.click(timeout=5000)
+                    log(f"[{username}] Clicked Next (submit fallback)")
+                    time.sleep(2)
         except Exception as e:
             log(f"[{username}] Submit error: {e}")
 
