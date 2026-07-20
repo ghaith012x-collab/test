@@ -105,49 +105,8 @@ def take_screenshot(username):
 
 # === TOR MANAGEMENT ===
 def _start_tor_instance(username, port_offset=0):
-    """Start a dedicated Tor process for this account."""
-    tor_data_dir = os.path.join(PROFILE_BASE, f"tor_data_{username}")
-    os.makedirs(tor_data_dir, exist_ok=True)
-    socks_port = 9050 + port_offset
-    control_port = 9051 + port_offset
-    
-    torrc_path = os.path.join(tor_data_dir, "torrc")
-    with open(torrc_path, "w") as f:
-        f.write(f"SocksPort {socks_port}\n")
-        f.write(f"ControlPort {control_port}\n")
-        f.write(f"DataDirectory {tor_data_dir}\n")
-        f.write("CookieAuthentication 0\n")
-        f.write("MaxCircuitDirtiness 10\n")
-    
-    tor_path = os.environ.get("TOR_PATH", "tor")
-    try:
-        proc = subprocess.Popen(
-            [tor_path, "-f", torrc_path],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL
-        )
-    except FileNotFoundError:
-        log(f"[{username}] Tor binary '{tor_path}' not found — continuing without Tor proxy.")
-        return None, None, None
-    time.sleep(3)
-    return proc, socks_port, control_port
-
-def _new_tor_identity(control_port):
-    """Request a new Tor circuit."""
-    try:
-        import socket
-        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        s.connect(("127.0.0.1", control_port))
-        s.send(b"AUTHENTICATE \"\"\r\n")
-        s.recv(1024)
-        s.send(b"SIGNAL NEWNYM\r\n")
-        s.recv(1024)
-        s.send(b"QUIT\r\n")
-        s.close()
-        time.sleep(2)
-        return True
-    except Exception:
-        return False
+    """Tor disabled: connect directly (no proxy)."""
+    return None, None, None
 
 # === BROWSER SESSION ===
 def _profile_dir_for(username):
@@ -180,10 +139,6 @@ def _start_browser_session(username, tor_socks_port=None):
             pass
         del browser_sessions[username]
     
-    proxy = None
-    if tor_socks_port:
-        proxy = {"server": f"socks5://127.0.0.1:{tor_socks_port}"}
-    
     pw = sync_playwright().start()
     _clear_stale_profile_lock(profile_dir)
     
@@ -206,10 +161,7 @@ def _start_browser_session(username, tor_socks_port=None):
             "--force-webrtc-ip-handling-policy=default_public_interface_only",
         ],
     )
-    
-    if proxy:
-        base_kwargs["proxy"] = proxy
-    
+
     context = None
     for attempt_headless in (False, True):
         launch_kwargs = dict(base_kwargs, headless=attempt_headless)
@@ -661,7 +613,9 @@ def get_gmail_otp(gmail_user="zeroghaith2012@gmail.com", gmail_pass=None, timeou
 
 # === TIKTOK SIGNUP FLOW ===
 def signup_tiktok(username, email, password, dob, tor_port_offset=0, auto_password=False, auto_dob=False):
-    """Full TikTok account creation with Tor, captcha solving, and OTP handling."""
+    """TikTok account creation: fill form, solve captchas, verify OTP, and
+    ONLY report success when TikTok actually advances past the signup page.
+    Connects directly (no Tor)."""
     log(f"[{username}] === STARTING TIKTOK SIGNUP ===")
 
     # Auto-generate credentials when requested / missing
@@ -672,16 +626,12 @@ def signup_tiktok(username, email, password, dob, tor_port_offset=0, auto_passwo
         dob = generate_dob()
         log(f"[{username}] Auto-selected DOB: {dob}")
     
-    # Start Tor (falls back to None when the tor binary is unavailable)
-    tor_proc, socks_port, control_port = _start_tor_instance(username, tor_port_offset)
-    if tor_proc is None:
-        log(f"[{username}] Running WITHOUT Tor proxy (direct connection).")
-    else:
-        log(f"[{username}] Tor started on SOCKS {socks_port}, Control {control_port}")
+    # Direct connection (no Tor, per configuration).
+    log(f"[{username}] Connecting directly (no proxy).")
 
-    # Start browser (no proxy when Tor is unavailable)
+    # Start browser
     try:
-        session = _start_browser_session(username, tor_socks_port=socks_port)
+        session = _start_browser_session(username, tor_socks_port=None)
     except Exception as e:
         log(f"[{username}] FATAL: could not launch browser: {e}")
         return False
@@ -734,16 +684,19 @@ def signup_tiktok(username, email, password, dob, tor_port_offset=0, auto_passwo
                 log(f"[{username}] DOB fill error: {e}")
         
         # Click signup/submit
+        submitted = False
         try:
             submit = page.locator('button[type="submit"], button:has-text("Sign up"), button:has-text("Next")').first
             if submit.count() > 0:
                 submit.click(timeout=5000)
+                submitted = True
+                log(f"[{username}] Submitted signup form")
                 time.sleep(2)
         except Exception as e:
             log(f"[{username}] Submit error: {e}")
-        
+
         take_screenshot(username)
-        
+
         # Handle post-submit captchas
         for _ in range(5):
             if _detect_tiktok_captcha(page):
@@ -751,48 +704,74 @@ def signup_tiktok(username, email, password, dob, tor_port_offset=0, auto_passwo
                 time.sleep(2)
             else:
                 break
-        
-        # Check for phone/email verification
-        try:
+
+        # --- HONEST OUTCOME VERIFICATION ---
+        # We do NOT claim success unless TikTok actually advances past signup.
+        success = False
+        end = time.time() + 180  # up to 3 min to resolve
+        while time.time() < end:
+            take_screenshot(username)
             body = (page.inner_text("body", timeout=3000) or "").lower()
-            if "verify" in body or "code" in body or "6-digit" in body:
+
+            # 1) Detect explicit failure messages from TikTok.
+            fail_signals = [
+                "already registered", "already in use", "this email is",
+                "something went wrong", "try again", "too many",
+                "couldn't", "unable to", "invalid", "sign up failed",
+                "not available", "please try", "error occurred",
+            ]
+            for sig in fail_signals:
+                if sig in body:
+                    # Only treat as failure if we're still on / near the signup form.
+                    if "sign up" in body or "create" in body or "email" in body:
+                        log(f"[{username}] TikTok rejected signup ({sig}). Not successful.")
+                        return False
+
+            # 2) Verification code required -> handle OTP, then re-check.
+            if "verify" in body or "code" in body or "6-digit" in body or "enter the code" in body:
                 log(f"[{username}] Verification code required")
-                # Try auto-fetch from Gmail
                 otp = get_gmail_otp(timeout=60)
                 if otp:
                     log(f"[{username}] Auto-fetched OTP: {otp}")
                     try:
-                        code_input = page.locator('input[type="text"], input[placeholder*="code" i], input[placeholder*="digit" i]').first
+                        code_input = page.locator('input[type="text"], input[placeholder*="code" i], input[placeholder*="digit" i], input[inputmode="numeric"]').first
                         if code_input.count() > 0:
                             code_input.fill(otp)
                             time.sleep(1)
-                            verify_btn = page.locator('button:has-text("Verify"), button:has-text("Submit")').first
+                            verify_btn = page.locator('button:has-text("Verify"), button:has-text("Submit"), button:has-text("Next")').first
                             if verify_btn.count() > 0:
                                 verify_btn.click(timeout=5000)
                                 time.sleep(3)
                     except Exception as e:
                         log(f"[{username}] OTP submit error: {e}")
                 else:
-                    log(f"[{username}] Waiting for manual OTP entry...")
-                    # Signal to dashboard that manual OTP is needed
-                    for _ in range(60):  # Wait up to 5 minutes
-                        time.sleep(5)
-                        take_screenshot(username)
-                        # Check if page advanced
-                        new_body = (page.inner_text("body", timeout=2000) or "").lower()
-                        if "verify" not in new_body and "code" not in new_body:
-                            log(f"[{username}] Page advanced - OTP was entered manually")
-                            break
-        except Exception as e:
-            log(f"[{username}] Verification check error: {e}")
-        
-        # Handle content check dialog
+                    log(f"[{username}] No OTP received — waiting for manual entry (inject via dashboard)...")
+                    # Wait for the user to inject OTP; keep polling.
+                    time.sleep(10)
+                    continue
+
+            # 3) Success signal: signup form is gone and we're past the signup page.
+            still_on_signup = ("sign up" in body and ("email" in body or "password" in body))
+            on_profile = page.locator('[data-e2e="profile-icon"], a[href*="/profile"], [class*="avatar"]').count() > 0
+            logged_in = page.locator('a[href*="/logout"], button:has-text("Log out"), [data-e2e="nav-login"]').count() == 0 and (
+                page.locator('a[href*="/foryou"], a[href*="/explore"], [data-e2e="search-box"]').count() > 0
+            )
+            if (not still_on_signup) and (on_profile or logged_in) and "verify" not in body and "code" not in body:
+                success = True
+                break
+
+            time.sleep(5)
+
+        if not success:
+            log(f"[{username}] Could not confirm account creation. Final URL: {page.url}")
+            return False
+
+        # Handle content check dialog (post-login)
         handle_content_check_dialog(page, username)
-        
-        # Final screenshot
+
         take_screenshot(username)
-        log(f"[{username}] Signup flow complete. Current URL: {page.url}")
-        
+        log(f"[{username}] ACCOUNT CREATED. Current URL: {page.url}")
+
         # Save session cookies
         try:
             cookies = session["context"].cookies()
@@ -802,7 +781,7 @@ def signup_tiktok(username, email, password, dob, tor_port_offset=0, auto_passwo
             log(f"[{username}] Saved {len(cookies)} cookies")
         except Exception as e:
             log(f"[{username}] Cookie save error: {e}")
-        
+
         return True
         
     except Exception as e:
