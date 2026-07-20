@@ -738,9 +738,7 @@ def signup_tiktok(username, email, password, dob, tor_port_offset=0, auto_passwo
         log(f"[{username}] Waiting 5s after filling fields before Send code")
         time.sleep(5)
 
-        # Coordinate-based click: find the "Send code" button via JS, read its
-        # bounding-box center, and click that exact pixel with the mouse. This
-        # avoids Playwright's actionability checks that can silently miss it.
+        # Click the actual enabled Send code control (not a coordinate guess).
         def _click_send_by_coords():
             # TikTok may render Send code as disabled until validation finishes.
             js = r"""
@@ -767,8 +765,16 @@ def signup_tiktok(username, email, password, dob, tor_port_offset=0, auto_passwo
             if not box:
                 return False
             try:
+                # Re-query by exact accessible name immediately before clicking;
+                # TikTok can re-render the button between lookup and mouse input.
+                btn = page.get_by_role("button", name="Send code", exact=True).first
+                if btn.count() > 0 and btn.is_visible() and btn.is_enabled():
+                    btn.scroll_into_view_if_needed(timeout=2000)
+                    btn.click(timeout=5000)
+                    log(f"[{username}] Clicked enabled 'Send code' button")
+                    return True
                 page.mouse.click(box["x"], box["y"])
-                log(f"[{username}] Clicked enabled '{box.get('t','')}' button")
+                log(f"[{username}] Clicked enabled 'Send code' button")
                 return True
             except Exception as e:
                 log(f"[{username}] Send-code click error: {e}")
