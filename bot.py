@@ -168,7 +168,9 @@ def _start_browser_session(username, tor_socks_port=None):
     )
 
     context = None
-    for attempt_headless in (False, True):
+    # This container has no X server, so try headless first to avoid a
+    # guaranteed headed-launch failure (and its delay).
+    for attempt_headless in (True, False):
         launch_kwargs = dict(base_kwargs, headless=attempt_headless)
         try:
             context = pw.chromium.launch_persistent_context(**launch_kwargs)
@@ -839,9 +841,19 @@ def signup_tiktok(username, email, password, dob, tor_port_offset=0, auto_passwo
             # 2) Verification code required -> handle OTP, then re-check.
             if "verify" in body or "code" in body or "6-digit" in body or "enter the code" in body:
                 log(f"[{username}] Verification code required")
-                otp = get_gmail_otp(gmail_user=email, timeout=60)
+
+                # Prefer a manually-injected code from the dashboard.
+                manual = (workers.get(username) or {}).get("manual_otp")
+                otp = None
+                if manual:
+                    otp = manual
+                    workers[username]["manual_otp"] = None
+                    log(f"[{username}] Using manually-injected OTP: {otp}")
+                else:
+                    otp = get_gmail_otp(gmail_user=email, timeout=40)
+
                 if otp:
-                    log(f"[{username}] Auto-fetched OTP: {otp}")
+                    log(f"[{username}] OTP: {otp}")
                     try:
                         code_input = page.locator('input[type="text"], input[placeholder*="code" i], input[placeholder*="digit" i], input[inputmode="numeric"]').first
                         if code_input.count() > 0:
@@ -855,8 +867,7 @@ def signup_tiktok(username, email, password, dob, tor_port_offset=0, auto_passwo
                         log(f"[{username}] OTP submit error: {e}")
                 else:
                     log(f"[{username}] No OTP received — waiting for manual entry (inject via dashboard)...")
-                    # Wait for the user to inject OTP; keep polling.
-                    time.sleep(10)
+                    time.sleep(8)
                     continue
 
             # 3) Success signal: signup form is gone and we're past the signup page.
