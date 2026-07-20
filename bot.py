@@ -867,14 +867,25 @@ def generate_password(length=14):
     return "".join(pwd)
 
 def generate_username():
-    """Generate a TikTok-style handle like 'user.8f3k2'."""
+    """Generate a long, unique TikTok-style handle unlikely to be taken.
+
+    Combines two adjectives + a noun + a long random alphanumeric suffix
+    (including a uuid fragment) so collisions are astronomically unlikely.
+    Example: lunarfrostpixelwolf_a9f3k2c71e
+    """
     adjectives = ["cool", "tiny", "lunar", "neon", "vibe", "pixel", "storm",
-                  "ghost", "frost", "echo", "nova", "drift", "cyber", "lazy"]
+                  "ghost", "frost", "echo", "nova", "drift", "cyber", "lazy",
+                  "crimson", "silent", "cosmic", "wild", "midnight", "velvet",
+                  "azure", "frozen", "electric", "shadow", "golden"]
     nouns = ["panda", "wolf", "comet", "tiger", "mango", "raven", "kitty",
-             "fox", "ninja", "bot", "star", "moon", "wave", "leaf"]
-    base = f"{random.choice(adjectives)}{random.choice(nouns)}"
-    suffix = "".join(random.choice("abcdefghijklmnopqrstuvwxyz0123456789") for _ in range(4))
-    return f"{base}{suffix}"
+             "fox", "ninja", "bot", "star", "moon", "wave", "leaf", "phoenix",
+             "dragon", "falcon", "otter", "lynx", "bison", "heron", "cobra"]
+    import uuid
+    base = f"{random.choice(adjectives)}{random.choice(adjectives)}{random.choice(nouns)}"
+    # 10-char random suffix + 4-char uuid fragment => ~14 chars of entropy
+    suffix = "".join(random.choice("abcdefghijklmnopqrstuvwxyz0123456789") for _ in range(10))
+    frag = uuid.uuid4().hex[:4]
+    return f"{base}_{suffix}{frag}"
 
 def generate_dob(min_age=18, max_age=45):
     """Return a random DOB (ISO date) making the user old enough to register."""
