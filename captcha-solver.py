@@ -5,6 +5,48 @@ import io
 import math
 from typing import Union, Tuple, Optional
 
+
+def solve_slide_puzzle(background_bytes: bytes, piece_bytes: bytes) -> Optional[float]:
+    """Return the x-offset (in px) of the puzzle piece within the background.
+
+    Ported from xtekky/TikTok-Captcha-Solver (OpenCV Sobel + template matching,
+    no external API required). Accepts raw image bytes.
+    """
+    try:
+        bg = _decode(background_bytes)
+        piece = _decode(piece_bytes)
+        if bg is None or piece is None:
+            return None
+        bg_proc = _sobel(bg)
+        piece_proc = _sobel(piece)
+        matched = cv2.matchTemplate(bg_proc, piece_proc, cv2.TM_CCOEFF_NORMED)
+        _, _, _, max_loc = cv2.minMaxLoc(matched)
+        return float(max_loc[0])
+    except Exception as e:
+        if debug_flag:
+            print(f"[slide_solver] error: {e}")
+        return None
+
+
+def _decode(buf: bytes):
+    arr = np.frombuffer(buf, np.uint8)
+    return cv2.imdecode(arr, cv2.IMREAD_COLOR)
+
+
+def _sobel(img):
+    ddepth = cv2.CV_16S
+    img = cv2.GaussianBlur(img, (3, 3), 0)
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    grad_x = cv2.Sobel(gray, ddepth, 1, 0, ksize=3, borderType=cv2.BORDER_DEFAULT)
+    grad_y = cv2.Sobel(gray, ddepth, 0, 1, ksize=3, borderType=cv2.BORDER_DEFAULT)
+    abs_x = cv2.convertScaleAbs(grad_x)
+    abs_y = cv2.convertScaleAbs(grad_y)
+    return cv2.addWeighted(abs_x, 0.5, abs_y, 0.5, 0)
+
+
+debug_flag = False
+
+
 def _load_image(img):
     try:
         if isinstance(img, str):

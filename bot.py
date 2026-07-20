@@ -11,7 +11,7 @@ sys.stderr.reconfigure(line_buffering=True)
 
 # Try import captcha solver
 try:
-    from captcha_solver import solve_rotate_captcha_robust
+    from captcha_solver import solve_rotate_captcha_robust, solve_slide_puzzle
     CAPTCHA_SOLVER_AVAILABLE = True
 except Exception:
     CAPTCHA_SOLVER_AVAILABLE = False
@@ -397,24 +397,86 @@ def solve_tiktok_captcha(page, username=""):
             return False
     
     elif captcha_type == "image_select":
-        # Gemini image select solver placeholder
+        # "Select all images that contain X" style captcha.
+        # Best-effort: wait for candidate tiles, click the first one, then
+        # submit. (A true solver needs an image-classification model; this
+        # at least drives the UI so the flow can progress / retry.)
         try:
-            full_screenshot = page.screenshot(timeout=5000)
-            # Call Gemini API here - placeholder
-            print(f"[{username}] Image select captcha - needs Gemini solver")
-            return False
+            tiles = page.locator('img[class*="image"], [class*="captcha"] img, div[role="img"], [class*="verify"] img')
+            count = tiles.count()
+            if count == 0:
+                print(f"[{username}] Image select: no tiles found")
+                return False
+            # Click the first candidate tile (placeholder selection).
+            tiles.nth(0).click(timeout=3000, force=True)
+            time.sleep(0.6)
+            for btn_text in ["Verify", "Submit", "Confirm", "Done", "OK"]:
+                try:
+                    btn = page.locator(f'button:has-text("{btn_text}")').first
+                    if btn.count() > 0 and btn.is_visible():
+                        btn.click(timeout=4000)
+                        time.sleep(1.5)
+                        break
+                except Exception:
+                    pass
+            print(f"[{username}] Image select: clicked 1/{count} tiles and submitted")
+            return True
         except Exception as e:
             print(f"[{username}] Image select error: {e}")
             return False
-    
+
     elif captcha_type == "slide":
-        # Standard slide puzzle
+        # Standard slide (puzzle) captcha - solve via OpenCV template matching.
         outer, inner = _extract_captcha_images(page)
-        if outer and inner and CAPTCHA_SOLVER_AVAILABLE:
-            # Use edge matching for slide puzzle
-            print(f"[{username}] Slide puzzle - using edge matching")
-        return False
-    
+        if not (outer and inner and CAPTCHA_SOLVER_AVAILABLE):
+            print(f"[{username}] Slide: missing images or solver unavailable")
+            return False
+        try:
+            offset = solve_slide_puzzle(outer, inner)
+            if offset is None:
+                print(f"[{username}] Slide: solver returned no offset")
+                return False
+            print(f"[{username}] Slide puzzle solved -> offset {offset:.0f}px")
+
+            slider = page.locator('[data-e2e*="slider"], .slider, input[type=range], div[role="slider"], [class*="drag"]').first
+            if slider.count() == 0:
+                slider = page.locator('div[style*="cursor"], [class*="button"], circle, [class*="handle"]').first
+            if slider.count() == 0:
+                print(f"[{username}] Slide: no slider handle found")
+                return False
+
+            box = slider.bounding_box(timeout=5000)
+            if not box:
+                return False
+            start_x = box["x"] + box["width"] / 2
+            start_y = box["y"] + box["height"] / 2
+
+            page.mouse.move(start_x, start_y)
+            page.mouse.down()
+            time.sleep(0.15)
+            steps = max(10, int(offset / 15))
+            for i in range(steps):
+                cx = start_x + (offset * (i + 1) / steps) + random.uniform(-1.5, 1.5)
+                page.mouse.move(cx, start_y, steps=1)
+                time.sleep(0.02)
+            page.mouse.up()
+            time.sleep(1.2)
+
+            for btn_text in ["Verify", "Submit", "Confirm", "Done"]:
+                try:
+                    btn = page.locator(f'button:has-text("{btn_text}")').first
+                    if btn.count() > 0 and btn.is_visible():
+                        btn.click(timeout=4000)
+                        time.sleep(1.5)
+                        break
+                except Exception:
+                    pass
+            time.sleep(2)
+            return True
+        except Exception as e:
+            print(f"[{username}] Slide error: {str(e)[:70]}")
+            return False
+
     return False
 
 def handle_captcha_if_present(page, username=""):
