@@ -73,7 +73,10 @@ def create_placeholder(username, text):
 def take_screenshot(username):
     session = browser_sessions.get(username)
     if not session:
-        screenshots[username] = create_placeholder(username, "No browser")
+        # Keep the last good frame instead of overwriting with a placeholder
+        # on every tick (which caused the live cam to go black).
+        if username not in screenshots:
+            screenshots[username] = create_placeholder(username, "No browser")
         return
     owner = session.get("owner_thread")
     if owner is not None and owner is not threading.current_thread():
@@ -87,21 +90,23 @@ def take_screenshot(username):
                     page = ctx_pages[-1]
                     session["page"] = page
                 else:
-                    if username not in screenshots:
-                        screenshots[username] = create_placeholder(username, "Page closed")
+                    # No pages: keep last good frame.
                     return
-            except Exception:
-                if username not in screenshots:
-                    screenshots[username] = create_placeholder(username, "Browser closed")
+            except Exception as e:
+                print(f"[{username}] screenshot page-resolve error: {e}")
                 return
         screenshot_bytes = page.screenshot(type="png", timeout=15000)
         img = Image.open(io.BytesIO(screenshot_bytes)).convert("RGB")
-        screenshots[username] = img
-        last_frame_ts[username] = time.time()
+        # Only replace the stored frame if we actually got a non-empty image.
+        if img.size[0] > 0 and img.size[1] > 0:
+            screenshots[username] = img
+            last_frame_ts[username] = time.time()
+        else:
+            print(f"[{username}] screenshot returned empty image; keeping last frame")
     except Exception as e:
-        err = str(e).split("\n")[0][:60]
-        if username not in screenshots:
-            screenshots[username] = create_placeholder(username, f"Screenshot error: {err}")
+        err = str(e).split("\n")[0][:120]
+        print(f"[{username}] SCREENSHOT ERROR: {err}")
+        # Preserve the previous good frame rather than showing a blank screen.
 
 # === TOR MANAGEMENT ===
 def _start_tor_instance(username, port_offset=0):
