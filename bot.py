@@ -869,18 +869,28 @@ def signup_tiktok(username, email, password, dob, tor_port_offset=0, auto_passwo
         # bounding-box center, and click that exact pixel with the mouse. This
         # avoids Playwright's actionability checks that can silently miss it.
         def _click_send_by_coords():
-            # Returns True if a Send-code/submit button was found and clicked.
+            # Click only the actual, visible, enabled "Send code" control.
+            # Do not fall back to generic Continue/Submit buttons.
             js = r"""
             () => {
-                const labels = ["send code","send","continue","sign up","signup","next","submit"];
-                const els = Array.from(document.querySelectorAll('button, [role="button"], input[type="submit"], a[role="button"]'));
+                const els = Array.from(document.querySelectorAll(
+                    'button, [role="button"], input[type="submit"], a[role="button"]'
+                ));
                 for (const el of els) {
-                    const t = (el.innerText || el.textContent || el.value || el.getAttribute('aria-label') || '').trim().toLowerCase();
-                    if (t && labels.some(l => t.includes(l))) {
-                        const r = el.getBoundingClientRect();
-                        if (r.width > 0 && r.height > 0) {
-                            return {x: r.x + r.width/2, y: r.y + r.height/2, t: el.innerText || el.textContent || el.value || ''};
-                        }
+                    const text = (el.innerText || el.textContent || el.value ||
+                                  el.getAttribute('aria-label') || '').trim()
+                                  .replace(/\s+/g, ' ').toLowerCase();
+                    const style = window.getComputedStyle(el);
+                    const r = el.getBoundingClientRect();
+                    const visible = r.width > 0 && r.height > 0 &&
+                                    style.visibility !== 'hidden' &&
+                                    style.display !== 'none';
+                    const disabled = el.disabled || el.getAttribute('aria-disabled') === 'true';
+                    if (text === 'send code' && visible && !disabled) {
+                        el.scrollIntoView({block: 'center', inline: 'center'});
+                        const rr = el.getBoundingClientRect();
+                        return {x: rr.x + rr.width / 2, y: rr.y + rr.height / 2,
+                                text: text};
                     }
                 }
                 return null;
@@ -889,17 +899,27 @@ def signup_tiktok(username, email, password, dob, tor_port_offset=0, auto_passwo
             try:
                 box = page.evaluate(js)
             except Exception as e:
-                log(f"[{username}] Send-code coord eval error: {e}")
+                log(f"[{username}] Send-code lookup error: {e}")
                 return False
             if not box:
                 return False
             try:
-                page.mouse.move(box["x"], box["y"])
+                # Re-resolve after scrolling and use the element's real click
+                # handler; this is what causes the verification request.
+                btn = page.locator(
+                    'button, [role="button"], input[type="submit"], a[role="button"]'
+                ).filter(has_text=re.compile(r'^\s*Send code\s*$', re.I)).last
+                if btn.count() > 0 and btn.is_visible() and btn.is_enabled():
+                    btn.scroll_into_view_if_needed(timeout=3000)
+                    btn.click(timeout=5000, no_wait_after=True)
+                    log(f"[{username}] Clicked enabled Send code button")
+                    return True
+                # Coordinate fallback, still using the exact Send code box.
                 page.mouse.click(box["x"], box["y"])
-                log(f"[{username}] Clicked (coords) button: '{box.get('t','').strip()}' at ({int(box['x'])},{int(box['y'])})")
+                log(f"[{username}] Clicked enabled Send code at ({int(box['x'])},{int(box['y'])})")
                 return True
             except Exception as e:
-                log(f"[{username}] Mouse click error: {e}")
+                log(f"[{username}] Send-code click error: {e}")
                 return False
 
         send_clicked = False
