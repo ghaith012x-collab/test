@@ -22,15 +22,22 @@ def health():
 @app.route("/api/start", methods=["POST"])
 def api_start():
     data = request.get_json() or {}
-    username = data.get("username", "test_user").strip() or "test_user"
-    email = data.get("email", "zeroghaith2012@gmail.com").strip()
+    auto_username = bool(data.get("auto_username", True))
     auto_password = bool(data.get("auto_password", True))
     auto_dob = bool(data.get("auto_dob", True))
+
+    # Email is locked to the operator's Gmail.
+    email = "zeroghaith2012@gmail.com"
+
+    # Auto-generate the username unless one was explicitly provided.
+    if auto_username:
+        username = generate_username()
+    else:
+        username = (data.get("username", "") or "").strip() or generate_username()
+
     password = data.get("password", "") if not auto_password else ""
     dob = data.get("dob", "") if not auto_dob else ""
 
-    if not email:
-        return jsonify({"error": "Email required"}), 400
     if not auto_password and not password:
         return jsonify({"error": "Password required"}), 400
 
