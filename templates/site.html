@@ -169,14 +169,15 @@
         <form id="startForm">
           <div class="field">
             <label for="username">Username / Handle</label>
-            <input type="text" id="username" value="test_user" autocomplete="off" />
+            <input type="text" id="username" value="test_user" autocomplete="off" disabled />
           </div>
           <div class="field">
-            <label for="email">Email</label>
-            <input type="email" id="email" value="zeroghaith2012@gmail.com" autocomplete="off" />
+            <label for="email">Email (locked)</label>
+            <input type="email" id="email" value="zeroghaith2012@gmail.com" autocomplete="off" disabled />
           </div>
 
           <div class="auto-row">
+            <label class="switch"><input type="checkbox" id="autoUser" checked /> Auto-generate username</label>
             <label class="switch"><input type="checkbox" id="autoCreds" checked /> Auto-generate password</label>
             <label class="switch"><input type="checkbox" id="autoDob" checked /> Auto-select date of birth</label>
           </div>
