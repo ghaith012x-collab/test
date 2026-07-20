@@ -109,9 +109,63 @@ def take_screenshot(username):
         # Preserve the previous good frame rather than showing a blank screen.
 
 # === TOR MANAGEMENT ===
+TOR_BASE_PORT = 9050
+_tor_instances = {}
+
 def _start_tor_instance(username, port_offset=0):
-    """Tor disabled: connect directly (no proxy)."""
-    return None, None, None
+    """Launch a fresh Tor instance for this worker. Using a unique
+    DataDirectory + SOCKS port per worker gives a brand-new circuit (and
+    therefore a new exit IP) every time a worker starts."""
+    import shutil, subprocess as _sp
+    socks_port = TOR_BASE_PORT + int(port_offset) + len(_tor_instances)
+    ctrl_port = socks_port + 1000
+    data_dir = os.path.join(PROFILE_BASE, f"tor_{username}_{socks_port}")
+    os.makedirs(data_dir, exist_ok=True)
+    # Start from a clean state so we always get a fresh identity/circuit.
+    shutil.rmtree(data_dir, ignore_errors=True)
+    os.makedirs(data_dir, exist_ok=True)
+    torrc = os.path.join(data_dir, "torrc")
+    with open(torrc, "w") as f:
+        f.write(f"SocksPort 127.0.0.1:{socks_port}\n")
+        f.write(f"ControlPort 127.0.0.1:{ctrl_port}\n")
+        f.write(f"DataDirectory {data_dir}\n")
+        f.write("CookieAuthentication 0\n")
+        f.write("Log notice stdout\n")
+    try:
+        proc = _sp.Popen(["tor", "-f", torrc], stdout=_sp.PIPE, stderr=_sp.STDOUT)
+    except Exception as e:
+        print(f"[{username}] Could not launch Tor: {e}")
+        return None, None, None
+    # Wait for the SOCKS port to come up.
+    up = False
+    for _ in range(40):
+        try:
+            import socket
+            with socket.create_connection(("127.0.0.1", socks_port), timeout=1):
+                up = True
+                break
+        except Exception:
+            time.sleep(0.5)
+    if not up:
+        print(f"[{username}] Tor SOCKS port {socks_port} did not open")
+        try: proc.terminate()
+        except Exception: pass
+        return None, None, None
+    _tor_instances[username] = (proc, socks_port, ctrl_port, data_dir)
+    print(f"[{username}] Tor up on SOCKS 127.0.0.1:{socks_port} (fresh IP)")
+    return proc, socks_port, None
+
+def _stop_tor_instance(username):
+    inst = _tor_instances.pop(username, None)
+    if not inst:
+        return
+    proc, socks_port, ctrl_port, data_dir = inst
+    try:
+        proc.terminate()
+        proc.wait(timeout=10)
+    except Exception:
+        try: proc.kill()
+        except Exception: pass
 
 # === BROWSER SESSION ===
 def _profile_dir_for(username):
@@ -147,6 +201,13 @@ def _start_browser_session(username, tor_socks_port=None):
     pw = sync_playwright().start()
     _clear_stale_profile_lock(profile_dir)
     
+    proxy_args = []
+    if tor_socks_port:
+        proxy_args = [
+            f"--proxy-server=socks5://127.0.0.1:{tor_socks_port}",
+            "--proxy-bypass-list=<-loopback>",
+        ]
+    
     base_kwargs = dict(
         user_data_dir=profile_dir,
         viewport={"width": 1280, "height": 720},
@@ -164,7 +225,7 @@ def _start_browser_session(username, tor_socks_port=None):
             "--window-size=1280,720",
             "--disable-webrtc",
             "--force-webrtc-ip-handling-policy=default_public_interface_only",
-        ],
+        ] + proxy_args,
     )
 
     context = None
@@ -668,14 +729,27 @@ def signup_tiktok(username, email, password, dob, tor_port_offset=0, auto_passwo
         dob = generate_dob()
         log(f"[{username}] Auto-selected DOB: {dob}")
     
-    # Direct connection (no Tor, per configuration).
-    log(f"[{username}] Connecting directly (no proxy).")
+    # Start a fresh Tor instance -> brand-new exit IP for this worker run.
+    tor_proc, tor_port, _ = _start_tor_instance(username, port_offset=tor_port_offset)
+    tor_socks = tor_port if tor_port else None
+    if tor_socks:
+        try:
+            pub = requests.get("https://api.ipify.org", proxies={
+                "http": f"socks5://127.0.0.1:{tor_socks}",
+                "https": f"socks5://127.0.0.1:{tor_socks}",
+            }, timeout=15).text.strip()
+            log(f"[{username}] Connected via Tor — public IP: {pub}")
+        except Exception as e:
+            log(f"[{username}] Could not read Tor IP: {e}")
+    else:
+        log(f"[{username}] Tor unavailable — connecting directly.")
 
-    # Start browser
+    # Start browser (routed through Tor when available)
     try:
-        session = _start_browser_session(username, tor_socks_port=None)
+        session = _start_browser_session(username, tor_socks_port=tor_socks)
     except Exception as e:
         log(f"[{username}] FATAL: could not launch browser: {e}")
+        _stop_tor_instance(username)
         return False
     page = session["page"]
     
@@ -916,6 +990,7 @@ def signup_tiktok(username, email, password, dob, tor_port_offset=0, auto_passwo
         return False
     finally:
         take_screenshot(username)
+        _stop_tor_instance(username)
 
 # === LIVE CAM THREAD ===
 def start_live_cam(username):
@@ -962,6 +1037,7 @@ def _worker_thread(username, email, password, dob, tor_offset, auto_password, au
                 browser_sessions[username]["pw"].stop()
             except: pass
             del browser_sessions[username]
+        _stop_tor_instance(username)
 
 def stop_worker(username):
     if username in workers:
@@ -974,6 +1050,7 @@ def stop_worker(username):
             browser_sessions[username]["pw"].stop()
         except: pass
         del browser_sessions[username]
+    _stop_tor_instance(username)
 
 # === CREDENTIAL GENERATION ===
 def generate_password(length=12):
